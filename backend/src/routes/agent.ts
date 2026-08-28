@@ -7,6 +7,8 @@ import { buildAgentRequestContext } from '../agents/context.js'
 import { mastra } from '../mastra/index.js'
 import { success, badRequest } from '../utils/response.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { currentUser } from '../middleware/auth.js'
+import { verifyOwnedEpisodeInDrama } from '../services/ownership.js'
 
 const app = new Hono()
 
@@ -45,6 +47,10 @@ app.post('/:type/chat', async (c) => {
     logTaskError('Agent', agentType, { reason: 'missing drama_id or episode_id' })
     return badRequest(c, 'drama_id and episode_id are required')
   }
+  const userId = currentUser(c).id
+  if (!await verifyOwnedEpisodeInDrama(Number(episode_id), Number(drama_id), userId)) {
+    return badRequest(c, '项目或剧集不存在')
+  }
 
   const agent = mastra.getAgent(agentType)
   if (!agent) {
@@ -53,6 +59,7 @@ app.post('/:type/chat', async (c) => {
   }
 
   const requestContext = buildAgentRequestContext({
+    userId,
     episodeId: episode_id,
     dramaId: drama_id,
     modelOverride: body.model || undefined,

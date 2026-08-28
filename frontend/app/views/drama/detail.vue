@@ -551,7 +551,7 @@
 
 <script setup>
 import { toast } from 'vue-sonner'
-import { dramaAPI, episodeAPI, characterAPI, sceneAPI, propAPI, uploadAPI } from '~/composables/useApi'
+import { dramaAPI, episodeAPI, characterAPI, sceneAPI, propAPI, taskAPI, uploadAPI } from '~/composables/useApi'
 import BaseSelect from '~/components/BaseSelect.vue'
 
 const route = useRoute()
@@ -677,6 +677,15 @@ const activeTab = ref('episodes')
 const assetTab = ref('all')
 const assetViewer = ref({ open: false, src: '', title: '' })
 const pendingMaterials = ref(new Set())
+const imageTasks = ref([])
+const {
+  pendingCharImageIds,
+  pendingSceneImageIds,
+  pendingPropImageIds,
+  pruneExpiredPendingImageAssets,
+} = usePendingImageAssets()
+let imageTasksTimer = null
+let imageTasksRefreshing = false
 const assetTabs = [
   { label: '全部', value: 'all' },
   { label: '角色', value: 'character' },
@@ -730,7 +739,105 @@ const assetGroups = computed(() => {
 })
 
 function pendingKey(m) { return `${m.kindKey}:${m.id}` }
-function isPending(m) { return pendingMaterials.value.has(pendingKey(m)) }
+function pendingIdsFor(kindKey) {
+  if (kindKey === 'character') return pendingCharImageIds
+  if (kindKey === 'scene') return pendingSceneImageIds
+  return pendingPropImageIds
+}
+function taskTargetId(task, kindKey) {
+  if (kindKey === 'character') return task.characterId ?? task.character_id
+  if (kindKey === 'scene') return task.sceneId ?? task.scene_id
+  return task.propId ?? task.prop_id
+}
+function hasProcessingImageTask(m) {
+  return imageTasks.value.some(task =>
+    isAssetImageTask(task) && task.status === 'processing' &&
+    Number(taskTargetId(task, m.kindKey)) === Number(m.id)
+  )
+}
+function isAssetImageTask(task) {
+  return task.type === 'image' && !!(
+    task.characterId ?? task.character_id ??
+    task.sceneId ?? task.scene_id ??
+    task.propId ?? task.prop_id
+  )
+}
+function isPending(m) {
+  return pendingMaterials.value.has(pendingKey(m)) ||
+    pendingIdsFor(m.kindKey).value.includes(m.id) ||
+    hasProcessingImageTask(m)
+}
+
+function markPending(m) {
+  const ids = pendingIdsFor(m.kindKey)
+  if (!ids.value.includes(m.id)) ids.value.push(m.id)
+}
+
+function clearPending(m) {
+  const key = pendingKey(m)
+  pendingMaterials.value = new Set([...pendingMaterials.value].filter(item => item !== key))
+  const ids = pendingIdsFor(m.kindKey)
+  ids.value = ids.value.filter(id => id !== m.id)
+}
+
+async function loadImageTasks() {
+  try {
+    imageTasks.value = await taskAPI.list({ type: 'image', drama_id: dramaId }) || []
+  } catch { /* 素材仍可正常展示 */ }
+}
+
+function shouldKeepMaterialPending(material) {
+  const tasks = imageTasks.value.filter(task =>
+    isAssetImageTask(task) &&
+    Number(taskTargetId(task, material.kindKey)) === Number(material.id)
+  )
+  if (tasks.some(task => task.status === 'processing')) return true
+  const latestTask = tasks.reduce((latest, task) =>
+    !latest || Number(task.id) > Number(latest.id) ? task : latest
+  , null)
+  return !latestTask || !['failed', 'completed'].includes(latestTask.status)
+}
+
+function reconcilePendingMaterials() {
+  for (const material of materials.value) {
+    if (matHasImage(material)) {
+      clearPending(material)
+      continue
+    }
+    if (!shouldKeepMaterialPending(material)) clearPending(material)
+  }
+}
+
+const activeImageTaskCount = computed(() =>
+  imageTasks.value.filter(task => isAssetImageTask(task) && task.status === 'processing').length
+)
+const localPendingMaterialCount = computed(() => materials.value.filter(isPending).length)
+
+function stopImageTasksPolling() {
+  if (imageTasksTimer) { clearInterval(imageTasksTimer); imageTasksTimer = null }
+}
+
+async function pollProjectGenerationState() {
+  if (imageTasksRefreshing) return
+  imageTasksRefreshing = true
+  try {
+    pruneExpiredPendingImageAssets()
+    const hadActiveTasks = activeImageTaskCount.value > 0
+    await loadImageTasks()
+    if (hadActiveTasks && activeImageTaskCount.value === 0) await sleep(300)
+    await load()
+    reconcilePendingMaterials()
+  } finally {
+    imageTasksRefreshing = false
+  }
+}
+
+watch([activeImageTaskCount, localPendingMaterialCount], ([active, localPending]) => {
+  stopImageTasksPolling()
+  if (active > 0 || localPending > 0) {
+    imageTasksTimer = setInterval(pollProjectGenerationState, 4000)
+  }
+}, { immediate: true })
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
@@ -740,34 +847,16 @@ async function generateMaterial(m) {
   const key = pendingKey(m)
   if (pendingMaterials.value.has(key)) return
   pendingMaterials.value = new Set(pendingMaterials.value).add(key)
+  markPending(m)
   try {
     if (m.kindKey === 'character') await characterAPI.generateImage(m.id, epId)
     else if (m.kindKey === 'scene') await sceneAPI.generateImage(m.id, epId)
     else await propAPI.generateImage(m.id, epId)
     toast.success(`${m.kind}「${m.name}」图片生成中`)
-    pollMaterial(m)
   } catch (e) {
-    pendingMaterials.value = new Set([...pendingMaterials.value].filter(k => k !== key))
+    clearPending(m)
     toast.error(e.message)
   }
-}
-
-// 生图为异步任务：轮询重新加载 drama，直到该素材 imageUrl 出现
-async function pollMaterial(m) {
-  const key = pendingKey(m)
-  for (let i = 0; i < 40; i++) {
-    await sleep(2500)
-    await load()
-    const d = drama.value
-    const list = m.kindKey === 'character' ? d?.characters : m.kindKey === 'scene' ? d?.scenes : d?.props
-    const rec = list?.find(x => x.id === m.id)
-    if (rec && matImage(rec)) {
-      pendingMaterials.value = new Set([...pendingMaterials.value].filter(k => k !== key))
-      return
-    }
-  }
-  pendingMaterials.value = new Set([...pendingMaterials.value].filter(k => k !== key))
-  toast.info(`${m.kind}「${m.name}」生成超时，可稍后刷新查看`)
 }
 
 function switchToAssets() {
@@ -897,7 +986,12 @@ async function saveEdit() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await Promise.all([load(), loadImageTasks()])
+  reconcilePendingMaterials()
+})
+
+onBeforeUnmount(stopImageTasksPolling)
 </script>
 
 <style scoped>

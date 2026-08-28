@@ -1,5 +1,7 @@
 /**
- * Agent prompt 文件加载 — workspace/prompts/<agent_type>.md
+ * Agent Prompt 加载。
+ * 仓库中的 workspace/prompts/<agent_type>.md 仅作为全局只读默认值；
+ * 用户修改后的 Prompt 保存在 user_agent_configs，避免不同用户互相覆盖。
  * 文件格式（参照 SKILL.md 惯例）：
  *   ---
  *   name: 分镜拆解
@@ -9,6 +11,8 @@
  * 文件即唯一事实来源；文件缺失时由调用方回退到代码默认值。
  */
 import { skillsManagerWorkspace } from './skills.js'
+import { and, eq } from 'drizzle-orm'
+import { db, schema } from '../db/index.js'
 
 export interface AgentPromptFile {
   name: string
@@ -44,7 +48,7 @@ export function serializePromptFile(file: AgentPromptFile): string {
 }
 
 /** 读取 Agent 的 prompt 文件；文件不存在或解析失败返回 null */
-export async function loadAgentPromptFile(agentType: string): Promise<AgentPromptFile | null> {
+export async function loadDefaultAgentPromptFile(agentType: string): Promise<AgentPromptFile | null> {
   try {
     const path = promptFilePath(agentType)
     if (!await fsm().exists(path)) return null
@@ -54,4 +58,18 @@ export async function loadAgentPromptFile(agentType: string): Promise<AgentPromp
   } catch {
     return null
   }
+}
+
+/** 读取用户私有 Prompt；未配置时返回仓库默认文件。 */
+export async function loadAgentPromptFile(userId: number, agentType: string): Promise<AgentPromptFile | null> {
+  const [config] = await db.select().from(schema.userAgentConfigs)
+    .where(and(eq(schema.userAgentConfigs.userId, userId), eq(schema.userAgentConfigs.agentType, agentType)))
+  if (config) {
+    return {
+      name: '',
+      model: config.model || '',
+      instructions: config.systemPrompt,
+    }
+  }
+  return loadDefaultAgentPromptFile(agentType)
 }

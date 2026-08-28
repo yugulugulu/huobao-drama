@@ -1,5 +1,5 @@
 /**
- * OpenAI DALL-E 图片生成 Adapter
+ * OpenAI 图片生成 Adapter
  * 端点: /v1/images/generations (注意 /v1 前缀)
  * 响应格式: { data: [{ url: "..." }] } 或 { data: [{ b64_json: "..." }] }
  */
@@ -9,7 +9,6 @@ import type {
   AIConfig,
   ImageGenerationRecord,
   ImageGenResponse,
-  ImagePollResponse,
 } from './types'
 import { joinProviderUrl } from './url'
 
@@ -33,6 +32,9 @@ export class OpenAIImageAdapter implements ImageProviderAdapter {
       n: 1,
     }
 
+    if (isGptImage) {
+      body.quality = 'medium'
+    }
     if (!isGptImage) {
       body.response_format = 'url'
     }
@@ -79,10 +81,8 @@ export class OpenAIImageAdapter implements ImageProviderAdapter {
   }
 
   parseGenerateResponse(result: any): ImageGenResponse {
-    // OpenAI DALL-E 3 目前是同步返回，但规范上也有异步 task 模式
-    if (result.task_id || result.id) {
-      return { isAsync: true, taskId: result.task_id || result.id }
-    }
+    // OpenAI Images API returns an operation id alongside the synchronous data
+    // payload. The id is not a task endpoint, so data must be parsed first.
     const imageUrl = result.data?.[0]?.url || result.url
     if (imageUrl) {
       return { isAsync: false, imageUrl }
@@ -93,31 +93,10 @@ export class OpenAIImageAdapter implements ImageProviderAdapter {
       // 对于 base64，返回特殊标记，实际处理在 extractImageBase64
       return { isAsync: false, imageUrl: undefined }
     }
-    throw new Error('No image URL in response')
-  }
-
-  buildPollRequest(config: AIConfig, taskId: string): ProviderRequest {
-    return {
-      url: joinProviderUrl(config.baseUrl, '/v1', `/images/task/${taskId}`),
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
-      body: undefined,
+    if (result.error) {
+      throw new Error(result.error.message || 'Image generation failed')
     }
-  }
-
-  parsePollResponse(result: any): ImagePollResponse {
-    if (result.status === 'completed') {
-      return {
-        status: 'completed',
-        imageUrl: result.image_url || result.data?.[0]?.url || null,
-      }
-    }
-    if (result.status === 'failed') {
-      return { status: 'failed', error: result.error?.message || 'Generation failed' }
-    }
-    return { status: result.status || 'processing' }
+    throw new Error('OpenAI Images API returned no image data')
   }
 
   extractImageUrl(result: any): string | null {

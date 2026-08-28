@@ -375,7 +375,7 @@
           </label>
           <label class="field">
             <span class="field-label">风格 key <span class="required">*</span></span>
-            <input v-model="styleForm.value" class="input mono" placeholder="如 3d、anime（小写字母/数字/中划线）" :disabled="!!styleEditId" />
+            <input v-model="styleForm.value" class="input mono" placeholder="如 live-action、live_action（小写字母/数字/中划线/下划线）" :disabled="!!styleEditId" />
             <span class="field-hint">存入项目的风格标识，创建后不可修改。</span>
           </label>
           <label class="field">
@@ -465,6 +465,7 @@ const providerPresets = {
     openai: { label: 'OpenAI 官方', baseUrl: 'https://api.openai.com', models: ['gpt-image-2'] },
   },
   video: {
+    openai: { label: 'TokenBox / OpenAI 兼容', baseUrl: 'https://tokenbox.you/v1', models: ['doubao-seedance-2-0-260128'] },
     volcengine: { label: 'Seedance 2.0 官方', baseUrl: 'https://ark.cn-beijing.volces.com', models: ['doubao-seedance-2-0-fast-260128', 'doubao-seedance-2-0-260128', 'doubao-seedance-2-0-mini-260615'] },
   },
 }
@@ -769,6 +770,8 @@ const stylePresets = ref([])
 const styleDialog = ref(false)
 const styleEditId = ref(null)
 const styleForm = reactive({ name: '', value: '', prompt: '', description: '', sort_order: 0 })
+// 与后端保持一致，提交前直接给出清晰的中文校验提示。
+const styleKeyPattern = /^[a-z0-9][a-z0-9_-]*$/
 
 async function loadStylePresets() {
   try { stylePresets.value = await stylePresetAPI.list(true) } catch (e) { toast.error(e.message) }
@@ -824,6 +827,10 @@ function startEditStyle(p) {
 async function saveStyle() {
   if (!styleForm.name?.trim() || !styleForm.prompt?.trim() || (!styleEditId.value && !styleForm.value?.trim())) {
     toast.warning('名称、key、提示词片段必填')
+    return
+  }
+  if (!styleEditId.value && !styleKeyPattern.test(styleForm.value.trim())) {
+    toast.warning('风格 key 仅支持小写字母、数字、中划线或下划线')
     return
   }
   try {

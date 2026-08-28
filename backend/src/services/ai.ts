@@ -2,7 +2,7 @@
  * AI 服务抽象层 — 从数据库配置中获取 provider 和 API key
  */
 import { db, schema } from '../db/index.js'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { logTaskProgress, logTaskWarn } from '../utils/task-logger.js'
 import { joinProviderUrl } from './adapters/url.js'
 
@@ -18,7 +18,7 @@ export interface AIConfig {
 export const officialProviders: Record<ServiceType, readonly string[]> = {
   text: ['openai', 'gemini', 'volcengine'],
   image: ['openai', 'gemini', 'volcengine'],
-  video: ['volcengine'],
+  video: ['openai', 'volcengine'],
 }
 
 export function isOfficialProvider(serviceType?: string | null, provider?: string | null): boolean {
@@ -48,9 +48,9 @@ export function getTextProviderBaseUrl(config: AIConfig) {
 const lastLoggedActiveConfigKey = new Map<string, string>()
 const lastLoggedConfigByIdKey = new Map<number, string>()
 
-export async function getActiveConfig(serviceType: ServiceType): Promise<AIConfig | null> {
+export async function getActiveConfig(serviceType: ServiceType, userId: number): Promise<AIConfig | null> {
   const rows = (await db.select().from(schema.aiServiceConfigs)
-    .where(eq(schema.aiServiceConfigs.serviceType, serviceType))
+    .where(and(eq(schema.aiServiceConfigs.userId, userId), eq(schema.aiServiceConfigs.serviceType, serviceType)))
   )
     .filter(r => r.isActive && isOfficialProvider(serviceType, r.provider))
     .sort((a, b) => (b.priority || 0) - (a.priority || 0)) // 高优先级优先
@@ -63,8 +63,9 @@ export async function getActiveConfig(serviceType: ServiceType): Promise<AIConfi
 
   const models = active.model ? JSON.parse(active.model) : []
   const logKey = `${active.id}:${models[0] || ''}`
-  if (lastLoggedActiveConfigKey.get(serviceType) !== logKey) {
-    lastLoggedActiveConfigKey.set(serviceType, logKey)
+  const cacheKey = `${userId}:${serviceType}`
+  if (lastLoggedActiveConfigKey.get(cacheKey) !== logKey) {
+    lastLoggedActiveConfigKey.set(cacheKey, logKey)
     logTaskProgress('AIConfig', 'active-config-selected', {
       serviceType,
       configId: active.id,
@@ -81,8 +82,33 @@ export async function getActiveConfig(serviceType: ServiceType): Promise<AIConfi
   }
 }
 
-export async function getTextConfig(): Promise<AIConfig> {
-  const config = await getActiveConfig('text')
+/** 重启恢复异步任务时，必须沿用任务创建时记录的 provider。 */
+export async function getActiveConfigForProvider(
+  serviceType: ServiceType,
+  userId: number,
+  provider: string,
+): Promise<AIConfig | null> {
+  const normalizedProvider = provider.toLowerCase()
+  const rows = (await db.select().from(schema.aiServiceConfigs)
+    .where(and(eq(schema.aiServiceConfigs.userId, userId), eq(schema.aiServiceConfigs.serviceType, serviceType)))
+  )
+    .filter(row => row.isActive && (row.provider || '').toLowerCase() === normalizedProvider)
+    .sort((a, b) => (b.priority || 0) - (a.priority || 0))
+
+  const active = rows[0]
+  if (!active || !isOfficialProvider(serviceType, active.provider)) return null
+
+  const models = active.model ? JSON.parse(active.model) : []
+  return {
+    provider: active.provider || '',
+    baseUrl: active.baseUrl,
+    apiKey: active.apiKey,
+    model: models[0] || '',
+  }
+}
+
+export async function getTextConfig(userId: number): Promise<AIConfig> {
+  const config = await getActiveConfig('text', userId)
   if (!config) throw new Error('未配置文本模型，请先到「设置」页添加并启用 AI 服务')
   return config
 }
@@ -90,18 +116,18 @@ export async function getTextConfig(): Promise<AIConfig> {
 /**
  * 取某服务类型当前启用且优先级最高的官方配置 ID（创建集时自动锁定用）
  */
-export async function getActiveConfigId(serviceType: ServiceType): Promise<number | null> {
+export async function getActiveConfigId(serviceType: ServiceType, userId: number): Promise<number | null> {
   const rows = (await db.select().from(schema.aiServiceConfigs)
-    .where(eq(schema.aiServiceConfigs.serviceType, serviceType))
+    .where(and(eq(schema.aiServiceConfigs.userId, userId), eq(schema.aiServiceConfigs.serviceType, serviceType)))
   )
     .filter(r => r.isActive && isOfficialProvider(serviceType, r.provider))
     .sort((a, b) => (b.priority || 0) - (a.priority || 0))
   return rows[0]?.id ?? null
 }
 
-export async function getConfigById(id: number): Promise<AIConfig | null> {
+export async function getConfigById(id: number, userId: number): Promise<AIConfig | null> {
   const [row] = await db.select().from(schema.aiServiceConfigs)
-    .where(eq(schema.aiServiceConfigs.id, id))
+    .where(and(eq(schema.aiServiceConfigs.id, id), eq(schema.aiServiceConfigs.userId, userId)))
   if (!row || !row.isActive) {
     logTaskWarn('AIConfig', 'config-by-id-missing', { configId: id })
     return null

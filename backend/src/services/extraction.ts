@@ -28,7 +28,7 @@ const EXTRACT_MESSAGES: Record<ExtractTarget, string> = {
 }
 
 /** 启动异步提取任务（立即返回）；同集同类型已在运行时返回 false；可指定文本模型覆盖 */
-export function startExtraction(episodeId: number, dramaId: number, target: ExtractTarget, opts: { model?: string; configId?: number } = {}): boolean {
+export function startExtraction(episodeId: number, dramaId: number, target: ExtractTarget, opts: { userId: number; model?: string; configId?: number }): boolean {
   const key = keyOf(episodeId, target)
   if (tasks.get(key)?.status === 'running') return false
 
@@ -40,6 +40,7 @@ export function startExtraction(episodeId: number, dramaId: number, target: Extr
     const agent = mastra.getAgent('extractor')
     if (!agent) throw new Error('提取 Agent 不可用')
     const requestContext = buildAgentRequestContext({
+      userId: opts.userId,
       episodeId,
       dramaId,
       modelOverride: opts.model || undefined,

@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import './config/env.js'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
@@ -20,12 +20,17 @@ import agent from './routes/agent.js'
 import merge from './routes/merge.js'
 import skills from './routes/skills.js'
 import props from './routes/props.js'
+import auth from './routes/auth.js'
+import { authRequired } from './middleware/auth.js'
+import { localStorageRoot, storageDriver, validateEnvironment } from './config/env.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
+import { recoverProcessingGenerationTasks } from './services/generation.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '../..')
 
 const app = new Hono()
+validateEnvironment()
 
 // Middleware
 app.use('*', cors({
@@ -40,6 +45,9 @@ app.get('/api/v1/health', (c) => c.json({ status: 'ok', timestamp: new Date().to
 
 // API routes
 const api = new Hono()
+// 认证接口在全局鉴权之前挂载；其余 API 默认必须携带合法 JWT。
+api.route('/auth', auth)
+api.use('*', authRequired)
 api.route('/dramas', dramas)
 api.route('/episodes', episodes)
 api.route('/storyboards', storyboards)
@@ -64,13 +72,21 @@ app.use('/static/*', async (c, next) => {
   await next()
   if (c.res.ok) c.header('Cache-Control', 'public, max-age=31536000, immutable')
 })
-app.use('/static/*', serveStatic({ root: path.join(projectRoot, 'data') }))
+if (storageDriver === 'local') {
+  app.use('/static/*', serveStatic({
+    root: localStorageRoot,
+    rewriteRequestPath: requestPath => requestPath.replace(/^\/static/, ''),
+  }))
+}
 
-// Serve frontend (production build)
-const distPath = path.join(projectRoot, 'frontend', 'dist')
-app.use('*', serveStatic({ root: distPath }))
-app.get('*', serveStatic({ root: distPath, path: 'index.html' }))
+// Serve frontend (production build). Disable when Nuxt runs separately in development.
+if (process.env.SERVE_FRONTEND !== 'false') {
+  const distPath = path.join(projectRoot, 'frontend', 'dist')
+  app.use('*', serveStatic({ root: distPath }))
+  app.get('*', serveStatic({ root: distPath, path: 'index.html' }))
+}
 
 const port = Number(process.env.PORT || 5679)
+await recoverProcessingGenerationTasks()
 console.log(`🚀 Huobao Drama TS server on http://localhost:${port}`)
 serve({ fetch: app.fetch, port })

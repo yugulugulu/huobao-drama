@@ -34,19 +34,15 @@ test('grid prompt agent tools save agent-written final prompts with style inject
 
 test('prompt agent instructions reference per-asset skills; skill files define the specs', () => {
   const agents = read('src/agents/index.ts')
-  const settings = read('../frontend/app/pages/settings.vue')
   const charSkill = read('workspace/skills/prompt-generator/character-prompt/SKILL.md')
   const sceneSkill = read('workspace/skills/prompt-generator/scene-prompt/SKILL.md')
 
-  for (const src of [agents, settings]) {
-    // 三类图片规范入口（具体创作规则在各自 SKILL.md 中）
-    assert.match(src, /角色三视图/)
-    assert.match(src, /场景固定视角/)
-    assert.match(src, /道具白底单品/)
-    // 保存工具约定
-    assert.match(src, /save_character_final_prompt/)
-    assert.match(src, /save_scene_final_prompt/)
-  }
+  // 默认提示词只在后端维护，设置中心通过私有 Prompt API 读取，不再复制一份默认文案。
+  assert.match(agents, /角色三视图/)
+  assert.match(agents, /场景固定视角/)
+  assert.match(agents, /道具白底单品/)
+  assert.match(agents, /save_character_final_prompt/)
+  assert.match(agents, /save_scene_final_prompt/)
   // 角色三视图 / 场景固定视角的必备要素由技能文件承载（纯中文输出）
   assert.match(charSkill, /正脸特写/)
   assert.match(charSkill, /正面、90 度侧面、背面/)
@@ -69,14 +65,14 @@ test('image generation prefers the stored final prompt with agent generation and
   // 已有最终提示词直接复用（force 时忽略强制重新生成）
   assert.match(service, /if \(char\.finalPrompt && !force\) return char\.finalPrompt/)
   assert.match(service, /if \(scene\.finalPrompt && !force\) return scene\.finalPrompt/)
-  assert.match(service, /force = false/)
+  assert.match(service, /force: boolean/)
 
-  assert.match(characters, /ensureCharacterFinalPrompt\(char, ep\.id, /)
+  assert.match(characters, /ensureCharacterFinalPrompt\(char, ep\.id, false, \{ userId,/)
   // 文本模型覆盖（text_model/text_config_id）透传到提示词 Agent
   assert.match(characters, /text_model/)
   assert.match(characters, /finalPrompt \|\| characterImagePrompt\(char, stylePrompt\)/)
-  assert.match(scenes, /ensureSceneFinalPrompt\(scene, ep\.id, /)
-  // 描述字段编辑后最终提示词失效
-  assert.match(characters, /updates\.finalPrompt = null/)
-  assert.match(scenes, /updates\.finalPrompt = null/)
+  assert.match(scenes, /ensureSceneFinalPrompt\(scene, ep\.id, false, \{ userId,/)
+  // 编辑普通描述不会静默清空用户已确认的最终提示词；仅显式传入时更新。
+  assert.match(characters, /body\.final_prompt !== undefined\) updates\.finalPrompt/)
+  assert.match(scenes, /body\.final_prompt !== undefined\) updates\.finalPrompt/)
 })

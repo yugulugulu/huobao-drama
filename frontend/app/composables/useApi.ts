@@ -1,7 +1,7 @@
 const BASE = '/api/v1'
 
 async function req<T = any>(method: string, path: string, body?: any): Promise<T> {
-  const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } }
+  const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'include' }
   if (body) opts.body = JSON.stringify(body)
 
   const start = performance.now()
@@ -13,6 +13,12 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
     const ms = Math.round(performance.now() - start)
 
     if (!resp.ok || (json.code && json.code >= 400)) {
+      // 受保护接口返回 401 时统一清理前端会话并跳转登录页。
+      if (resp.status === 401 && !path.startsWith('/auth/')) {
+        useState('auth-user').value = null
+        const route = useRoute()
+        await navigateTo({ path: '/login', query: { redirect: route.fullPath } })
+      }
       console.log(`%c[API] %c${method} ${path} %c${resp.status} %c${ms}ms`, 'color:#888', 'color:#ef5350', 'color:#ef5350;font-weight:bold', 'color:#888', json.message || '')
       throw new Error(json.message || `${resp.status}`)
     }
@@ -109,13 +115,20 @@ async function uploadReq<T = any>(path: string, file: File): Promise<T> {
   const fd = new FormData()
   fd.append('file', file)
   console.log(`%c[API] %cPOST %c${path} %c${file.name}`, 'color:#888', 'color:#4fc3f7;font-weight:bold', 'color:#ccc', 'color:#888')
-  const resp = await fetch(`${BASE}${path}`, { method: 'POST', body: fd })
+  const resp = await fetch(`${BASE}${path}`, { method: 'POST', body: fd, credentials: 'include' })
   const json = await resp.json()
   if (!resp.ok || (json.code && json.code >= 400)) {
     console.log(`%c[API] %cPOST ${path} %c${resp.status}`, 'color:#888', 'color:#ef5350', 'color:#ef5350;font-weight:bold')
     throw new Error(json.message || `${resp.status}`)
   }
   return json.data ?? json
+}
+
+export const authAPI = {
+  me: () => api.get<{ user: any }>('/auth/me'),
+  login: (data: { email: string; password: string }) => api.post<{ user: any }>('/auth/login', data),
+  register: (data: { email: string; display_name: string; password: string }) => api.post<{ user: any }>('/auth/register', data),
+  logout: () => api.post('/auth/logout'),
 }
 
 export const uploadAPI = {

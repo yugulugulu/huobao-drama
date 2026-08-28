@@ -6,10 +6,9 @@ services:
       MYSQL_USER: huobao
       MYSQL_PASSWORD: huobao
       MYSQL_ROOT_PASSWORD: huobao_root
-    ports:
-      - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-phuobao_root"]
@@ -22,6 +21,8 @@ services:
     build: .
     ports:
       - "5679:5679"
+    env_file:
+      - ./backend/.env.production
     volumes:
       - ./data:/app/data
       # skills 可在设置页在线编辑,且 workspace 是 Agent 文件读写 jail 根,需持久化
@@ -29,7 +30,6 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5679
-      - DATABASE_URL=mysql://huobao:huobao@mysql:3306/huobao_drama
     depends_on:
       mysql:
         condition: service_healthy

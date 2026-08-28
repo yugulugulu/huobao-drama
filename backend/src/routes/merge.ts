@@ -1,18 +1,21 @@
 import { Hono } from 'hono'
 import { and, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
-import { success, badRequest } from '../utils/response.js'
+import { success, badRequest, notFound } from '../utils/response.js'
 import { mergeEpisodeVideos } from '../services/ffmpeg-merge.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { currentUser } from '../middleware/auth.js'
+import { findOwnedEpisode } from '../services/ownership.js'
 
 const app = new Hono()
 
 // POST /episodes/:id/merge — 拼接镜头视频(body.storyboard_ids 可选,只拼所选)
 app.post('/episodes/:id/merge', async (c) => {
   const episodeId = Number(c.req.param('id'))
-  const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
-  if (!ep) return badRequest(c, 'Episode not found')
+  const userId = currentUser(c).id
+  const ep = await findOwnedEpisode(episodeId, userId)
+  if (!ep) return notFound(c, 'Episode not found')
 
   let storyboardIds: number[] | undefined
   try {
@@ -24,7 +27,7 @@ app.post('/episodes/:id/merge', async (c) => {
 
   try {
     logTaskStart('MergeAPI', 'episode-merge', { episodeId, dramaId: ep.dramaId, storyboardIds })
-    const mergeId = await mergeEpisodeVideos(episodeId, ep.dramaId, storyboardIds)
+    const mergeId = await mergeEpisodeVideos(userId, episodeId, ep.dramaId, storyboardIds)
     logTaskSuccess('MergeAPI', 'episode-merge', { episodeId, mergeId })
     return success(c, { merge_id: mergeId, status: 'processing' })
   } catch (err: any) {
@@ -36,8 +39,10 @@ app.post('/episodes/:id/merge', async (c) => {
 // GET /episodes/:id/merge — 查询最新拼接状态
 app.get('/episodes/:id/merge', async (c) => {
   const episodeId = Number(c.req.param('id'))
+  const userId = currentUser(c).id
+  if (!await findOwnedEpisode(episodeId, userId)) return notFound(c, '剧集不存在')
   const merges = await db.select().from(schema.videoMerges)
-    .where(eq(schema.videoMerges.episodeId, episodeId))
+    .where(and(eq(schema.videoMerges.userId, userId), eq(schema.videoMerges.episodeId, episodeId)))
 
 
   const latest = merges[merges.length - 1]
@@ -49,8 +54,10 @@ app.get('/episodes/:id/merge', async (c) => {
 // GET /episodes/:id/merges — 成片列表(全部拼接记录,新的在前)
 app.get('/episodes/:id/merges', async (c) => {
   const episodeId = Number(c.req.param('id'))
+  const userId = currentUser(c).id
+  if (!await findOwnedEpisode(episodeId, userId)) return notFound(c, '剧集不存在')
   const merges = await db.select().from(schema.videoMerges)
-    .where(and(eq(schema.videoMerges.episodeId, episodeId), isNull(schema.videoMerges.deletedAt)))
+    .where(and(eq(schema.videoMerges.userId, userId), eq(schema.videoMerges.episodeId, episodeId), isNull(schema.videoMerges.deletedAt)))
   merges.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
   return success(c, merges.slice(0, 30).map(toSnakeCase))
 })

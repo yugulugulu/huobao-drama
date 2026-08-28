@@ -1,9 +1,11 @@
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
-import { success, created, badRequest } from '../utils/response.js'
+import { success, created, badRequest, notFound } from '../utils/response.js'
 import { generateImage, generateVideo } from '../services/generation.js'
 import { logTaskError, logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { currentUser } from '../middleware/auth.js'
+import { findOwnedCharacter, findOwnedDrama, findOwnedScene, findOwnedStoryboard, findOwnedTask } from '../services/ownership.js'
 
 const app = new Hono()
 
@@ -12,6 +14,7 @@ type TaskType = 'image' | 'video'
 // POST /tasks — 发起生成任务（body.type: image | video）
 app.post('/', async (c) => {
   const body = await c.req.json()
+  const userId = currentUser(c).id
   const type = body.type as TaskType
   if (type !== 'image' && type !== 'video') return badRequest(c, 'type 必须为 image 或 video')
 
@@ -34,13 +37,17 @@ app.post('/', async (c) => {
   }
 
   try {
+    if (body.drama_id && !await findOwnedDrama(Number(body.drama_id), userId)) return notFound(c, '项目不存在')
+    if (body.storyboard_id && !await findOwnedStoryboard(Number(body.storyboard_id), userId)) return notFound(c, '分镜不存在')
+    if (body.scene_id && !await findOwnedScene(Number(body.scene_id), userId)) return notFound(c, '场景不存在')
+    if (body.character_id && !await findOwnedCharacter(Number(body.character_id), userId)) return notFound(c, '角色不存在')
     // 集锁定的生成配置优先于请求指定；视频分辨率同样锁定到集
     let configId: number | undefined = body.config_id
     let episodeResolution: string | undefined
     if (body.storyboard_id) {
-      const [sb] = await db.select().from(schema.storyboards).where(eq(schema.storyboards.id, Number(body.storyboard_id)))
+      const [sb] = await db.select().from(schema.storyboards).where(and(eq(schema.storyboards.id, Number(body.storyboard_id)), eq(schema.storyboards.userId, userId)))
       if (sb) {
-        const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, sb.episodeId))
+        const [ep] = await db.select().from(schema.episodes).where(and(eq(schema.episodes.id, sb.episodeId), eq(schema.episodes.userId, userId)))
         const locked = type === 'image' ? ep?.imageConfigId : ep?.videoConfigId
         if (locked != null) configId = locked
         if (type === 'video' && ep?.resolution) episodeResolution = ep.resolution
@@ -58,6 +65,7 @@ app.post('/', async (c) => {
 
     const id = type === 'image'
       ? await generateImage({
+        userId,
         storyboardId: body.storyboard_id,
         dramaId: body.drama_id,
         sceneId: body.scene_id,
@@ -70,6 +78,7 @@ app.post('/', async (c) => {
         configId,
       })
       : await generateVideo({
+        userId,
         storyboardId: body.storyboard_id,
         dramaId: body.drama_id,
         prompt: body.prompt,
@@ -86,7 +95,7 @@ app.post('/', async (c) => {
       })
 
     const [record] = await db.select().from(schema.sysTask)
-      .where(eq(schema.sysTask.id, id))
+      .where(and(eq(schema.sysTask.id, id), eq(schema.sysTask.userId, userId)))
     logTaskSuccess('TaskAPI', 'generate', { taskId: id, type, provider: record?.provider })
     return created(c, record)
   } catch (err: any) {
@@ -98,9 +107,9 @@ app.post('/', async (c) => {
 // GET /tasks/:id — 轮询任务状态
 app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
-  const [row] = await db.select().from(schema.sysTask)
-    .where(eq(schema.sysTask.id, id))
-  return success(c, row || null)
+  const row = await findOwnedTask(id, currentUser(c).id)
+  if (!row) return notFound(c, '任务不存在')
+  return success(c, row)
 })
 
 // GET /tasks — 按 type / storyboard_id / drama_id 过滤
@@ -109,7 +118,8 @@ app.get('/', async (c) => {
   const storyboardId = c.req.query('storyboard_id')
   const dramaId = c.req.query('drama_id')
 
-  let rows = await db.select().from(schema.sysTask)
+  const userId = currentUser(c).id
+  let rows = await db.select().from(schema.sysTask).where(eq(schema.sysTask.userId, userId))
 
   if (type) rows = rows.filter(r => r.type === type)
   if (storyboardId) rows = rows.filter(r => r.storyboardId === Number(storyboardId))
@@ -121,7 +131,9 @@ app.get('/', async (c) => {
 // DELETE /tasks/:id
 app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
-  await db.delete(schema.sysTask).where(eq(schema.sysTask.id, id))
+  const userId = currentUser(c).id
+  if (!await findOwnedTask(id, userId)) return notFound(c, '任务不存在')
+  await db.delete(schema.sysTask).where(and(eq(schema.sysTask.id, id), eq(schema.sysTask.userId, userId)))
   return success(c)
 })
 

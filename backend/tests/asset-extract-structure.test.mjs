@@ -59,7 +59,9 @@ test('episodes route exposes async extract endpoints', () => {
   assert.match(route, /app\.post\('\/:id\/extract'/)
   assert.match(route, /app\.get\('\/:id\/extract-status'/)
   assert.match(route, /target 必须是 characters \/ scenes \/ props/)
-  assert.match(route, /startExtraction\(ep\.id, ep\.dramaId, target, \{ model: body\.model/)
+  // 提取任务必须携带当前用户，异步 Agent 才能继续执行租户隔离查询。
+  assert.match(route, /const userId = currentUser\(c\)\.id/)
+  assert.match(route, /startExtraction\(ep\.id, ep\.dramaId, target, \{ userId, model: body\.model/)
   // 顶栏文本模型覆盖透传到提取 Agent
   assert.match(read('src/services/extraction.ts'), /modelOverride: opts\.model/)
   assert.match(route, /getExtractionStatus\(id\)/)

@@ -2,7 +2,7 @@
  * 批量视频提示词任务 — 异步为缺少 video_prompt 的分镜逐个运行 prompt_generator Agent
  * 进程内内存态：按集跟踪一份任务，运行中不重复启动；重启后状态丢失
  */
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { mastra } from '../mastra/index.js'
 import { buildAgentRequestContext } from '../agents/context.js'
@@ -26,13 +26,13 @@ const tasks = new Map<number, VideoPromptBatchStatus>()
 export async function startVideoPromptBatch(
   episodeId: number,
   dramaId: number,
-  opts: { model?: string; configId?: number } = {},
+  opts: { userId: number; model?: string; configId?: number },
   storyboardIds?: number[],
 ): Promise<{ started: boolean; total: number }> {
   if (tasks.get(episodeId)?.status === 'running') return { started: false, total: -1 }
 
   const sbs = await db.select().from(schema.storyboards)
-    .where(eq(schema.storyboards.episodeId, episodeId))
+    .where(and(eq(schema.storyboards.userId, opts.userId), eq(schema.storyboards.episodeId, episodeId)))
     .orderBy(schema.storyboards.storyboardNumber)
   const pending = storyboardIds?.length
     ? sbs.filter(sb => storyboardIds.includes(sb.id))
@@ -40,10 +40,10 @@ export async function startVideoPromptBatch(
   if (!pending.length) return { started: false, total: 0 }
 
   // 视频模型标签：跟随该集锁定的视频配置，供 Agent 按模型特性生成
-  const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
+  const [ep] = await db.select().from(schema.episodes).where(and(eq(schema.episodes.id, episodeId), eq(schema.episodes.userId, opts.userId)))
   let videoLabel = '默认'
   if (ep?.videoConfigId) {
-    const [cfg] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, ep.videoConfigId))
+    const [cfg] = await db.select().from(schema.aiServiceConfigs).where(and(eq(schema.aiServiceConfigs.id, ep.videoConfigId), eq(schema.aiServiceConfigs.userId, opts.userId)))
     if (cfg) videoLabel = `${cfg.name} (${cfg.provider})`
   }
 
@@ -61,6 +61,7 @@ export async function startVideoPromptBatch(
     const agent = mastra.getAgent('prompt_generator')
     if (!agent) throw new Error('视频提示词 Agent 不可用')
     const requestContext = buildAgentRequestContext({
+      userId: opts.userId,
       episodeId,
       dramaId,
       modelOverride: opts.model || undefined,
@@ -76,7 +77,7 @@ export async function startVideoPromptBatch(
 请先调用 read_storyboard_context 获取该分镜的画面描述(含【镜头N】子镜头与台词/旁白)、氛围及时长，据此生成 video_prompt(按 3 秒分段换行、用 @角色名/@场景名/@道具名 引用参考素材；段落内允许多镜头切镜，段与段可以是不同景别/角度/对象，但不跨场景，切镜点对齐分镜 description 的【镜头N】结构),然后调用 update_storyboard 保存到分镜 ID:${sb.id}。只更新 video_prompt 字段,不要改动其他字段,不要重新拆分整集。`,
         }], { maxSteps: 8, requestContext })
         // 以实际落库为准判定成败
-        const [fresh] = await db.select().from(schema.storyboards).where(eq(schema.storyboards.id, sb.id))
+        const [fresh] = await db.select().from(schema.storyboards).where(and(eq(schema.storyboards.id, sb.id), eq(schema.storyboards.userId, opts.userId)))
         if ((fresh?.videoPrompt || '').trim()) task.completed++
         else {
           task.failed++

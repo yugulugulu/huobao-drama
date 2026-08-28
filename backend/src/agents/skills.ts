@@ -9,6 +9,8 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { Workspace, LocalFilesystem } from '@mastra/core/workspace'
+import { and, eq } from 'drizzle-orm'
+import { db, schema } from '../db/index.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -19,7 +21,7 @@ const SKILLS_DIR = path.join(WORKSPACE_DIR, 'skills')
 fs.mkdirSync(SKILLS_DIR, { recursive: true })
 
 /** 每个 Agent 注册的 skill 目录（相对 workspace/skills/，含子规范目录；目录名需符合 Agent Skills 规范：小写+连字符） */
-const AGENT_SKILL_MAP: Record<string, string[]> = {
+export const AGENT_SKILL_MAP: Record<string, string[]> = {
   script_rewriter: ['script-rewriter'],
   extractor: ['extractor'],
   storyboard_breaker: ['storyboard-breaker'],
@@ -29,6 +31,14 @@ const AGENT_SKILL_MAP: Record<string, string[]> = {
     'prompt-generator/prop-prompt',
     'prompt-generator/video-prompt',
   ],
+}
+
+/** 根据技能路径判断其归属 Agent；自定义技能必须位于某个 Agent 的既有目录下。 */
+export function resolveSkillAgentType(skillId: string): string | null {
+  for (const [agentType, prefixes] of Object.entries(AGENT_SKILL_MAP)) {
+    if (prefixes.some(prefix => skillId === prefix || skillId.startsWith(`${prefix}/`))) return agentType
+  }
+  return null
 }
 
 /** 每个 Agent 的 Workspace（filesystem 工作目录 + 原生技能注册）
@@ -81,7 +91,7 @@ function formatSkillSection(skillId: string, content: string): string {
 /** 读取 Agent 专属技能全文（经 workspace.skills API，保持原注入格式）
  *  AGENT_SKILL_MAP 的目录按前缀匹配：目录自身及其子目录下所有 SKILL.md 都会注入，
  *  因此设置页新建的子技能（如 storyboard-breaker/xxx）无需改代码即可生效 */
-export async function loadAgentSkills(agentType: string): Promise<string> {
+export async function loadAgentSkills(userId: number, agentType: string): Promise<string> {
   const workspace = skillWorkspaces[agentType]
   const prefixes = AGENT_SKILL_MAP[agentType] || []
   if (!workspace || !prefixes.length) return ''
@@ -90,11 +100,21 @@ export async function loadAgentSkills(agentType: string): Promise<string> {
   const relPaths = allPaths.filter(p =>
     prefixes.some(prefix => p === prefix || p.startsWith(prefix + '/')))
 
+  const privateSkills = await db.select().from(schema.userAgentSkills)
+    .where(and(eq(schema.userAgentSkills.userId, userId), eq(schema.userAgentSkills.agentType, agentType)))
+  const privateById = new Map(privateSkills.map(skill => [skill.skillId, skill.content]))
   const contents: string[] = []
   for (const relPath of relPaths) {
-    const skill = await workspace.skills?.get(`skills/${relPath}`)
-    const body = skill?.instructions?.trim()
+    const privateContent = privateById.get(relPath)
+    const skill = privateContent ? null : await workspace.skills?.get(`skills/${relPath}`)
+    const body = privateContent?.trim() || skill?.instructions?.trim()
     if (body) contents.push(formatSkillSection(relPath, body))
+    privateById.delete(relPath)
+  }
+
+  // 用户可以在对应 Agent 目录下新增私有 Skill，这些内容不会写入共享 workspace。
+  for (const [skillId, content] of privateById) {
+    if (content.trim()) contents.push(formatSkillSection(skillId, content.trim()))
   }
 
   if (!contents.length) return ''

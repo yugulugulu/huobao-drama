@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { success, badRequest } from '../utils/response.js'
 import { saveUploadedFile, generateImageThumb } from '../utils/storage.js'
+import { currentUser } from '../middleware/auth.js'
 
 const app = new Hono()
 
@@ -14,10 +15,10 @@ app.post('/image', async (c) => {
   }
 
   const buffer = await file.arrayBuffer()
-  const path = await saveUploadedFile(buffer, 'uploads', file.name)
+  const path = await saveUploadedFile(buffer, currentUser(c).id, 'uploads', file.name)
   // 同步生成列表页缩略图，上传图与生图走同一套展示链路（失败不影响上传结果）
   await generateImageThumb(path)
-  return success(c, { url: `/${path}`, path })
+  return success(c, { url: path.startsWith('http') ? path : `/${path}`, path })
 })
 
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.m4v'])
@@ -56,8 +57,8 @@ async function saveMediaUpload(
   if (buffer.byteLength > maxBytes) {
     return badRequest(c, `${label}文件大小不能超过 ${Math.round(maxBytes / 1024 / 1024)}MB`)
   }
-  const path = await saveUploadedFile(buffer, 'uploads', file.name)
-  return success(c, { url: `/${path}`, path })
+  const path = await saveUploadedFile(buffer, currentUser(c).id, 'uploads', file.name)
+  return success(c, { url: path.startsWith('http') ? path : `/${path}`, path })
 }
 
 // POST /upload/video — 参考视频上传（Seedance 多模态参考用）

@@ -12,38 +12,34 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import {
+  mysqlColumnBackfillStatements,
   mysqlSchemaStatements,
-  mysqlDataSeedStatements,
+  tenantMigrationStatements,
 } from '../src/db/mysql-schema.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const outPath = path.resolve(process.argv[2] || path.join(__dirname, '../../docker/init.sql'))
-
-/** 把 ? 占位符内联为 SQL 字面量(导出静态文件,不走参数化) */
-function inlineParams(sql: string, params: unknown[]): string {
-  let i = 0
-  const inlined = sql.replace(/\?/g, () => {
-    const v = params[i++]
-    if (v === null || v === undefined) return 'NULL'
-    if (typeof v === 'number') return String(v)
-    return `'${String(v).replace(/'/g, "''")}'`
-  })
-  if (i !== params.length) throw new Error(`参数数量与占位符不匹配: ${sql}`)
-  return inlined
-}
+const databaseName = process.env.MYSQL_DATABASE || 'huobao_drama'
+if (!/^[a-zA-Z0-9_]+$/.test(databaseName)) throw new Error(`非法数据库名: ${databaseName}`)
 
 const sections: string[] = []
+const legacyBackfillSql = new Set(mysqlColumnBackfillStatements.map(({ sql }) => sql))
+const freshDatabaseStatements = tenantMigrationStatements.filter(sql => !legacyBackfillSql.has(sql))
 
 sections.push(`-- ============================================================================
 -- Huobao Drama 初始化 SQL
 -- 由 backend/scripts/export-init-sql.ts 从 backend/src/db/mysql-schema.ts 生成
 -- 生成时间: ${new Date().toISOString()}
 --
--- 注意: 应用启动时会自动执行同等初始化(幂等),本文件不是部署必需,
---       仅供 DBA 审核或在应用外预建表使用
+-- 用途: 在全新 MySQL 8.0+ 服务器上创建数据库与当前完整表结构。
+-- 默认风格预设由应用在用户注册或历史账号初始化时按用户写入。
 -- ============================================================================
 
 SET NAMES utf8mb4;
+CREATE DATABASE IF NOT EXISTS \`${databaseName}\`
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+USE \`${databaseName}\`;
 `)
 
 sections.push(`-- ----------------------------------------------------------------------------
@@ -53,12 +49,13 @@ ${mysqlSchemaStatements.map(s => `${s};`).join('\n\n')}
 `)
 
 sections.push(`-- ----------------------------------------------------------------------------
--- 2. 种子数据: 风格预设(幂等,只补缺失行)
+-- 2. 当前版本增量结构
+-- 说明: 此文件面向空数据库，以下语句在基础表上补齐多用户字段与索引。
 -- ----------------------------------------------------------------------------
-${mysqlDataSeedStatements.map(s => `${inlineParams(s.sql, s.params)};`).join('\n')}
+${freshDatabaseStatements.map(s => `${s};`).join('\n\n')}
 `)
 
 fs.mkdirSync(path.dirname(outPath), { recursive: true })
 fs.writeFileSync(outPath, sections.join('\n'), 'utf8')
 console.log(`✅ 已导出: ${outPath}`)
-console.log(`   建表 ${mysqlSchemaStatements.length} 条, 种子 ${mysqlDataSeedStatements.length} 条`)
+console.log(`   数据库 ${databaseName}, 基础建表 ${mysqlSchemaStatements.length} 条, 增量结构 ${freshDatabaseStatements.length} 条`)

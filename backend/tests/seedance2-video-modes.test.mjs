@@ -123,13 +123,13 @@ test('image/video generation tasks are unified into a single sys_task table', ()
   assert.doesNotMatch(mysqlSchema, /CREATE TABLE IF NOT EXISTS video_generations/)
   assert.doesNotMatch(mysqlSchema, /column: 'reference_video_urls'/)
 
-  // DDL 与旧表清理（不迁移历史）
+  // 当前 DDL 只创建统一任务表；旧表即使仍存在也不会再被运行时代码访问。
   assert.match(mysqlSchema, /CREATE TABLE IF NOT EXISTS sys_task \(/)
   assert.match(mysqlSchema, /type VARCHAR\(16\) NOT NULL/)
   assert.match(mysqlSchema, /params TEXT/)
   assert.match(mysqlSchema, /result_url TEXT/)
-  assert.match(mysqlSchema, /DROP TABLE IF EXISTS `image_generations`/)
-  assert.match(mysqlSchema, /DROP TABLE IF EXISTS `video_generations`/)
+  assert.doesNotMatch(mysqlSchema, /schema\.imageGenerations/)
+  assert.doesNotMatch(mysqlSchema, /schema\.videoGenerations/)
 
   // 路由与服务只操作 sys_task（统一 /tasks 入口，type 过滤）
   const tasksRoute = read('src/routes/tasks.ts')

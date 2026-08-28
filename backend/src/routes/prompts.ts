@@ -4,24 +4,28 @@
  */
 import { Hono } from 'hono'
 import { success, badRequest } from '../utils/response.js'
-import { skillsManagerWorkspace } from '../agents/skills.js'
 import { validAgentTypes, DEFAULT_PROMPTS } from '../agents/index.js'
-import { loadAgentPromptFile, serializePromptFile, promptFilePath } from '../agents/prompts.js'
+import { loadAgentPromptFile } from '../agents/prompts.js'
+import { currentUser } from '../middleware/auth.js'
+import { and, eq } from 'drizzle-orm'
+import { db, schema } from '../db/index.js'
+import { now } from '../utils/response.js'
 
 const app = new Hono()
-const fsm = () => skillsManagerWorkspace.filesystem!
-
 const checkType = (type: string) => validAgentTypes.includes(type)
 
 // GET /prompts — 列出全部 Agent 的 prompt 状态
 app.get('/', async (c) => {
+  const userId = currentUser(c).id
   const list = await Promise.all(validAgentTypes.map(async (type) => {
-    const file = await loadAgentPromptFile(type)
+    const [privateConfig] = await db.select({ id: schema.userAgentConfigs.id }).from(schema.userAgentConfigs)
+      .where(and(eq(schema.userAgentConfigs.userId, userId), eq(schema.userAgentConfigs.agentType, type)))
+    const file = await loadAgentPromptFile(userId, type)
     return {
       agent_type: type,
       name: file?.name || DEFAULT_PROMPTS[type].name,
       model: file?.model || '',
-      is_default: !file,
+      is_default: !privateConfig,
     }
   }))
   return success(c, list)
@@ -31,8 +35,11 @@ app.get('/', async (c) => {
 app.get('/:type', async (c) => {
   const type = c.req.param('type')
   if (!checkType(type)) return badRequest(c, 'Unknown agent type')
-  const file = await loadAgentPromptFile(type)
-  if (file) {
+  const userId = currentUser(c).id
+  const [privateConfig] = await db.select({ id: schema.userAgentConfigs.id }).from(schema.userAgentConfigs)
+    .where(and(eq(schema.userAgentConfigs.userId, userId), eq(schema.userAgentConfigs.agentType, type)))
+  const file = await loadAgentPromptFile(userId, type)
+  if (file && privateConfig) {
     return success(c, {
       agent_type: type,
       name: file.name || DEFAULT_PROMPTS[type].name,
@@ -43,9 +50,9 @@ app.get('/:type', async (c) => {
   }
   return success(c, {
     agent_type: type,
-    name: DEFAULT_PROMPTS[type].name,
-    model: '',
-    system_prompt: DEFAULT_PROMPTS[type].instructions,
+    name: file?.name || DEFAULT_PROMPTS[type].name,
+    model: file?.model || '',
+    system_prompt: file?.instructions || DEFAULT_PROMPTS[type].instructions,
     is_default: true,
   })
 })
@@ -54,12 +61,29 @@ app.get('/:type', async (c) => {
 app.put('/:type', async (c) => {
   const type = c.req.param('type')
   if (!checkType(type)) return badRequest(c, 'Unknown agent type')
+  const userId = currentUser(c).id
   const body = await c.req.json()
   const instructions = String(body.system_prompt ?? '').trim()
   if (!instructions) return badRequest(c, 'system_prompt required')
   const name = String(body.name || DEFAULT_PROMPTS[type].name)
   const model = String(body.model ?? '').trim()
-  await fsm().writeFile(promptFilePath(type), serializePromptFile({ name, model, instructions }), { recursive: true })
+  const ts = now()
+  const [existing] = await db.select({ id: schema.userAgentConfigs.id }).from(schema.userAgentConfigs)
+    .where(and(eq(schema.userAgentConfigs.userId, userId), eq(schema.userAgentConfigs.agentType, type)))
+  if (existing) {
+    await db.update(schema.userAgentConfigs)
+      .set({ model, systemPrompt: instructions, updatedAt: ts })
+      .where(and(eq(schema.userAgentConfigs.id, existing.id), eq(schema.userAgentConfigs.userId, userId)))
+  } else {
+    await db.insert(schema.userAgentConfigs).values({
+      userId,
+      agentType: type,
+      model,
+      systemPrompt: instructions,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  }
   return success(c, { agent_type: type, name, model, is_default: false })
 })
 
@@ -67,8 +91,9 @@ app.put('/:type', async (c) => {
 app.post('/:type/reset', async (c) => {
   const type = c.req.param('type')
   if (!checkType(type)) return badRequest(c, 'Unknown agent type')
-  const path = promptFilePath(type)
-  if (await fsm().exists(path)) await fsm().deleteFile(path)
+  const userId = currentUser(c).id
+  await db.delete(schema.userAgentConfigs)
+    .where(and(eq(schema.userAgentConfigs.userId, userId), eq(schema.userAgentConfigs.agentType, type)))
   return success(c, { agent_type: type, is_default: true })
 })
 

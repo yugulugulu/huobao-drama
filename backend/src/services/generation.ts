@@ -1,13 +1,12 @@
 /**
  * 统一生成任务服务 — 图片/视频生成共用 sys_task 表与同一条生命周期：
- * 创建(processing) → 适配器构建请求 → 同步完成或异步轮询 → 下载落盘 → 回写业务表
+ * 创建(processing) → 适配器构建请求 → 同步完成或异步轮询 → 回写业务表
  */
 import { db, getInsertId, schema } from '../db/index.js'
-import { eq } from 'drizzle-orm'
-import { getActiveConfig, getConfigById } from './ai.js'
+import { and, eq } from 'drizzle-orm'
+import { getActiveConfig, getActiveConfigForProvider, getConfigById } from './ai.js'
 import { now } from '../utils/response.js'
 import { downloadFile, generateImageThumb, readImageAsCompressedDataUrl, saveBase64Image } from '../utils/storage.js'
-import { extractVideoPoster } from '../utils/video-poster.js'
 import { getImageAdapter, getVideoAdapter } from './adapters/registry'
 import type { AIConfig } from './adapters/types'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
@@ -23,6 +22,8 @@ const POLL_PROFILES: Record<TaskType, { attempts: number; intervalMs: number; ma
 }
 
 interface GenerateImageParams {
+  /** 当前登录用户，由路由层注入，禁止从客户端请求体直接信任。 */
+  userId: number
   storyboardId?: number
   dramaId?: number
   sceneId?: number
@@ -37,6 +38,8 @@ interface GenerateImageParams {
 }
 
 interface GenerateVideoParams {
+  /** 当前登录用户，由路由层注入，禁止从客户端请求体直接信任。 */
+  userId: number
   storyboardId?: number
   dramaId?: number
   prompt: string
@@ -58,11 +61,11 @@ interface GenerateVideoParams {
 export async function generateImage(params: GenerateImageParams): Promise<number> {
   // 指定配置（集锁定）可能已停用/删除/厂商收敛，失效时回退到当前启用配置，避免生成被旧引用卡死
   const config = params.configId
-    ? (await getConfigById(params.configId)) ?? await getActiveConfig('image')
-    : await getActiveConfig('image')
+    ? (await getConfigById(params.configId, params.userId)) ?? await getActiveConfig('image', params.userId)
+    : await getActiveConfig('image', params.userId)
   if (!config) throw new Error('未配置图片模型，请先到「设置」页添加并启用 AI 服务')
 
-  const id = await createTask('image', config, {
+  const id = await createTask('image', params.userId, config, {
     storyboardId: params.storyboardId,
     dramaId: params.dramaId,
     sceneId: params.sceneId,
@@ -96,11 +99,11 @@ export async function generateImage(params: GenerateImageParams): Promise<number
 export async function generateVideo(params: GenerateVideoParams): Promise<number> {
   // 指定配置（集锁定）可能已停用/删除/厂商收敛，失效时回退到当前启用配置
   const config = params.configId
-    ? (await getConfigById(params.configId)) ?? await getActiveConfig('video')
-    : await getActiveConfig('video')
+    ? (await getConfigById(params.configId, params.userId)) ?? await getActiveConfig('video', params.userId)
+    : await getActiveConfig('video', params.userId)
   if (!config) throw new Error('未配置视频模型，请先到「设置」页添加并启用 AI 服务')
 
-  const id = await createTask('video', config, {
+  const id = await createTask('video', params.userId, config, {
     storyboardId: params.storyboardId,
     dramaId: params.dramaId,
     prompt: params.prompt,
@@ -137,6 +140,7 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
 
 async function createTask(
   type: TaskType,
+  userId: number,
   config: AIConfig,
   fields: {
     storyboardId?: number
@@ -151,6 +155,7 @@ async function createTask(
 ): Promise<number> {
   const ts = now()
   const res = await db.insert(schema.sysTask).values({
+    userId,
     type,
     ...fields,
     provider: config.provider,
@@ -161,7 +166,7 @@ async function createTask(
   })
 
   const id = getInsertId(res)
-  processTask(id, config).catch(err => {
+  processTask(id, userId, config).catch(err => {
     logTaskError(taskLabel(type), 'process', { id, error: err.message })
     console.error(`${taskLabel(type)} ${id} failed:`, err)
   })
@@ -177,9 +182,10 @@ function parseTaskParams(raw: string | null | undefined): Record<string, any> {
   }
 }
 
-async function processTask(id: number, config: AIConfig) {
+async function processTask(id: number, userId: number, config: AIConfig) {
   try {
-    const [record] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, id))
+    const [record] = await db.select().from(schema.sysTask)
+      .where(and(eq(schema.sysTask.id, id), eq(schema.sysTask.userId, userId)))
     if (!record) return
     const type = record.type as TaskType
     const label = taskLabel(type)
@@ -273,7 +279,7 @@ async function processTask(id: number, config: AIConfig) {
         throw new Error('No image URL or base64 data in response')
       }
 
-      await markPolling(id, taskId)
+      await markPolling(id, userId, taskId)
       pollTask(record, config, taskId!)
       return
     }
@@ -287,28 +293,73 @@ async function processTask(id: number, config: AIConfig) {
       return
     }
 
-    await markPolling(id, taskId)
+    await markPolling(id, userId, taskId)
     pollTask(record, config, taskId!)
   } catch (err: any) {
-    await failTask(id, err.message)
+    await failTask(id, userId, err.message)
   }
 }
 
-async function markPolling(id: number, taskId: string | undefined) {
+async function markPolling(id: number, userId: number, taskId: string | undefined) {
   await db.update(schema.sysTask)
     .set({ taskId, status: 'processing', updatedAt: now() })
-    .where(eq(schema.sysTask.id, id))
+    .where(and(eq(schema.sysTask.id, id), eq(schema.sysTask.userId, userId)))
   logTaskProgress('SysTask', 'poll-start', { id, taskId })
 }
 
-async function failTask(id: number, message: string) {
+async function failTask(id: number, userId: number, message: string) {
   logTaskError('SysTask', 'failed', { id, error: message })
   await db.update(schema.sysTask)
     .set({ status: 'failed', errorMsg: message, updatedAt: now() })
-    .where(eq(schema.sysTask.id, id))
+    .where(and(eq(schema.sysTask.id, id), eq(schema.sysTask.userId, userId)))
 }
 
 type SysTaskRecord = typeof schema.sysTask.$inferSelect
+
+const RESTART_INTERRUPTED_ERROR = '服务重启导致生成中断，请重新生成'
+
+/**
+ * 服务启动时处理上个进程遗留的生成任务：
+ * - 无上游 taskId 的同步请求无法恢复，直接失败；
+ * - 有 taskId 的异步请求按原 provider 恢复轮询。
+ */
+export async function recoverProcessingGenerationTasks() {
+  const records = await db.select().from(schema.sysTask).where(eq(schema.sysTask.status, 'processing'))
+  if (!records.length) return
+
+  logTaskProgress('SysTask', 'recovery-start', { count: records.length })
+
+  for (const record of records) {
+    if (!record.taskId) {
+      await failTask(record.id, record.userId, RESTART_INTERRUPTED_ERROR)
+      continue
+    }
+
+    const type = record.type as TaskType
+    if (type !== 'image' && type !== 'video') {
+      await failTask(record.id, record.userId, `Unsupported task type during recovery: ${record.type}`)
+      continue
+    }
+
+    const provider = (record.provider || '').trim()
+    const config = provider
+      ? await getActiveConfigForProvider(type, record.userId, provider)
+      : null
+    if (!config) {
+      await failTask(record.id, record.userId, `服务重启后无法恢复任务：未找到可用的 ${provider || '未知'} ${type} 配置`)
+      continue
+    }
+
+    logTaskProgress(taskLabel(type), 'poll-resume', {
+      id: record.id,
+      taskId: record.taskId,
+      provider: config.provider,
+    })
+    void pollTask(record, config, record.taskId).catch(async (err: any) => {
+      await failTask(record.id, record.userId, `恢复轮询失败：${err.message}`)
+    })
+  }
+}
 
 async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string) {
   const type = record.type as TaskType
@@ -317,9 +368,14 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
   const adapter = type === 'image' ? getImageAdapter(config.provider) : getVideoAdapter(config.provider)
   const startedAt = Date.now()
 
+  if (!adapter.buildPollRequest || !adapter.parsePollResponse) {
+    await failTask(record.id, record.userId, 'Provider returned an asynchronous image task, but this provider only supports synchronous image responses')
+    return
+  }
+
   for (let i = 0; i < profile.attempts; i++) {
     if (profile.maxDurationMs && Date.now() - startedAt >= profile.maxDurationMs) {
-      await failTask(record.id, 'Timeout: Polling exceeded 10 minutes')
+      await failTask(record.id, record.userId, 'Timeout: Polling exceeded 10 minutes')
       return
     }
     await new Promise(r => setTimeout(r, profile.intervalMs))
@@ -371,30 +427,30 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
       }
       if (pollResp.status === 'failed') {
         // 上游明确失败（如内容审核拦截）属终态：立即落库，不重试不等待超时
-        await failTask(record.id, pollResp.error || 'Generation failed')
+        await failTask(record.id, record.userId, pollResp.error || 'Generation failed')
         return
       }
     } catch (err: any) {
       const exhausted = i === profile.attempts - 1
         || (profile.maxDurationMs != null && Date.now() - startedAt >= profile.maxDurationMs)
       if (exhausted) {
-        await failTask(record.id, `Timeout: ${err.message}`)
+        await failTask(record.id, record.userId, `Timeout: ${err.message}`)
         return
       }
       logTaskWarn(label, 'poll-retry', { id: record.id, taskId, attempt: i + 1, error: err.message })
     }
   }
-  await failTask(record.id, 'Timeout: polling attempts exhausted')
+  await failTask(record.id, record.userId, 'Timeout: polling attempts exhausted')
 }
 
 async function handleImageComplete(record: SysTaskRecord, imageUrl: string) {
-  const localPath = await downloadFile(imageUrl, 'images')
+  const localPath = await downloadFile(imageUrl, record.userId, 'images')
   // 列表页缩略图（前端按命名约定推导地址，失败不影响主流程）
   await generateImageThumb(localPath)
 
   await db.update(schema.sysTask)
     .set({ resultUrl: imageUrl, localPath, status: 'completed', completedAt: now(), updatedAt: now() })
-    .where(eq(schema.sysTask.id, record.id))
+    .where(and(eq(schema.sysTask.id, record.id), eq(schema.sysTask.userId, record.userId)))
 
   logTaskSuccess('ImageTask', 'downloaded', { id: record.id, provider: record.provider, localPath })
 
@@ -402,12 +458,12 @@ async function handleImageComplete(record: SysTaskRecord, imageUrl: string) {
 }
 
 async function handleImageCompleteBase64(record: SysTaskRecord, base64Data: string, mimeType: string) {
-  const localPath = await saveBase64Image(base64Data, mimeType, 'images')
+  const localPath = await saveBase64Image(base64Data, mimeType, record.userId, 'images')
   await generateImageThumb(localPath)
 
   await db.update(schema.sysTask)
     .set({ localPath, status: 'completed', completedAt: now(), updatedAt: now() })
-    .where(eq(schema.sysTask.id, record.id))
+    .where(and(eq(schema.sysTask.id, record.id), eq(schema.sysTask.userId, record.userId)))
 
   logTaskSuccess('ImageTask', 'saved-base64', { id: record.id, provider: record.provider, mimeType, localPath })
 
@@ -422,33 +478,30 @@ async function writeBackImageAssets(record: SysTaskRecord, localPath: string) {
     if (params.frameType === 'first_frame') sbUpdate.firstFrameImage = localPath
     else if (params.frameType === 'last_frame') sbUpdate.lastFrameImage = localPath
     else sbUpdate.composedImage = localPath
-    await db.update(schema.storyboards).set(sbUpdate).where(eq(schema.storyboards.id, record.storyboardId))
+    await db.update(schema.storyboards).set(sbUpdate).where(and(eq(schema.storyboards.id, record.storyboardId), eq(schema.storyboards.userId, record.userId)))
   }
   if (record.characterId) {
-    await db.update(schema.characters).set({ imageUrl: localPath, updatedAt: now() }).where(eq(schema.characters.id, record.characterId))
+    await db.update(schema.characters).set({ imageUrl: localPath, updatedAt: now() }).where(and(eq(schema.characters.id, record.characterId), eq(schema.characters.userId, record.userId)))
   }
   if (record.sceneId) {
-    await db.update(schema.scenes).set({ imageUrl: localPath, status: 'completed', updatedAt: now() }).where(eq(schema.scenes.id, record.sceneId))
+    await db.update(schema.scenes).set({ imageUrl: localPath, status: 'completed', updatedAt: now() }).where(and(eq(schema.scenes.id, record.sceneId), eq(schema.scenes.userId, record.userId)))
   }
   if (record.propId) {
-    await db.update(schema.props).set({ imageUrl: localPath, updatedAt: now() }).where(eq(schema.props.id, record.propId))
+    await db.update(schema.props).set({ imageUrl: localPath, updatedAt: now() }).where(and(eq(schema.props.id, record.propId), eq(schema.props.userId, record.userId)))
   }
 }
 
 async function handleVideoComplete(record: SysTaskRecord, videoUrl: string, duration: number | null | undefined) {
-  const localPath = await downloadFile(videoUrl, 'videos')
-  // 海报帧供列表/封面展示，避免前端为显示首帧缓冲整个视频
-  await extractVideoPoster(localPath)
   await db.update(schema.sysTask)
-    .set({ resultUrl: videoUrl, localPath, status: 'completed', completedAt: now(), updatedAt: now() })
-    .where(eq(schema.sysTask.id, record.id))
+    .set({ resultUrl: videoUrl, localPath: null, status: 'completed', completedAt: now(), updatedAt: now() })
+    .where(and(eq(schema.sysTask.id, record.id), eq(schema.sysTask.userId, record.userId)))
 
-  logTaskSuccess('VideoTask', 'downloaded', { id: record.id, localPath, storyboardId: record.storyboardId, duration })
+  logTaskSuccess('VideoTask', 'linked', { id: record.id, videoUrl, storyboardId: record.storyboardId, duration })
 
   if (record.storyboardId) {
     await db.update(schema.storyboards)
-      .set({ videoUrl: localPath, duration: duration || undefined, updatedAt: now() })
-      .where(eq(schema.storyboards.id, record.storyboardId))
+      .set({ videoUrl, duration: duration || undefined, updatedAt: now() })
+      .where(and(eq(schema.storyboards.id, record.storyboardId), eq(schema.storyboards.userId, record.userId)))
   }
 }
 

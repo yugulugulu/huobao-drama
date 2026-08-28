@@ -1,9 +1,11 @@
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
-import { success, created, now, badRequest } from '../utils/response.js'
+import { success, created, now, badRequest, notFound } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { currentUser } from '../middleware/auth.js'
+import { findOwnedEpisode, findOwnedStoryboard } from '../services/ownership.js'
 
 const app = new Hono()
 
@@ -79,6 +81,8 @@ async function validateStoryboardBindings(episodeId: number, sceneId: number | n
 // POST /storyboards
 app.post('/', async (c) => {
   const body = await c.req.json()
+  const userId = currentUser(c).id
+  if (!await findOwnedEpisode(Number(body.episode_id), userId)) return notFound(c, '剧集不存在')
   const ts = now()
   logTaskStart('StoryboardAPI', 'create', {
     episodeId: body.episode_id,
@@ -89,6 +93,7 @@ app.post('/', async (c) => {
   logTaskPayload('StoryboardAPI', 'create body', body)
   await validateStoryboardBindings(body.episode_id, body.scene_id, body.character_ids, body.prop_ids)
   const res = await db.insert(schema.storyboards).values({
+    userId,
     episodeId: body.episode_id,
     storyboardNumber: body.storyboard_number || 1,
     title: body.title,
@@ -101,7 +106,7 @@ app.post('/', async (c) => {
   await syncStoryboardCharacters(getInsertId(res), body.character_ids || [])
   await syncStoryboardProps(getInsertId(res), body.prop_ids || [])
   const [result] = await db.select().from(schema.storyboards)
-    .where(eq(schema.storyboards.id, getInsertId(res)))
+    .where(and(eq(schema.storyboards.id, getInsertId(res)), eq(schema.storyboards.userId, userId)))
   logTaskSuccess('StoryboardAPI', 'create', {
     storyboardId: result.id,
     episodeId: result.episodeId,
@@ -117,9 +122,10 @@ app.post('/', async (c) => {
 // PUT /storyboards/:id
 app.put('/:id', async (c) => {
   const id = Number(c.req.param('id'))
+  const userId = currentUser(c).id
   const body = await c.req.json()
-  const [storyboard] = await db.select().from(schema.storyboards).where(eq(schema.storyboards.id, id))
-  if (!storyboard) return badRequest(c, '镜头不存在')
+  const storyboard = await findOwnedStoryboard(id, userId)
+  if (!storyboard) return notFound(c, '镜头不存在')
   logTaskStart('StoryboardAPI', 'update', {
     storyboardId: id,
     episodeId: storyboard.episodeId,
@@ -149,7 +155,7 @@ app.put('/:id', async (c) => {
     'prop_ids' in body ? body.prop_ids : await getStoryboardPropIds(id),
   )
 
-  await db.update(schema.storyboards).set(updates).where(eq(schema.storyboards.id, id))
+  await db.update(schema.storyboards).set(updates).where(and(eq(schema.storyboards.id, id), eq(schema.storyboards.userId, userId)))
   if ('character_ids' in body) await syncStoryboardCharacters(id, body.character_ids || [])
   if ('prop_ids' in body) await syncStoryboardProps(id, body.prop_ids || [])
   logTaskSuccess('StoryboardAPI', 'update', {
@@ -164,10 +170,12 @@ app.put('/:id', async (c) => {
 // DELETE /storyboards/:id
 app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
+  const userId = currentUser(c).id
+  if (!await findOwnedStoryboard(id, userId)) return notFound(c, '镜头不存在')
   logTaskStart('StoryboardAPI', 'delete', { storyboardId: id })
   await db.delete(schema.storyboardCharacters).where(eq(schema.storyboardCharacters.storyboardId, id))
   await db.delete(schema.storyboardProps).where(eq(schema.storyboardProps.storyboardId, id))
-  await db.delete(schema.storyboards).where(eq(schema.storyboards.id, id))
+  await db.delete(schema.storyboards).where(and(eq(schema.storyboards.id, id), eq(schema.storyboards.userId, userId)))
   logTaskSuccess('StoryboardAPI', 'delete', { storyboardId: id })
   return success(c)
 })

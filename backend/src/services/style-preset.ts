@@ -5,12 +5,13 @@
 import { and, eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 
-/** 查询项目绑定的风格预设英文提示词片段；查不到返回 '' */
-export async function getDramaStylePrompt(dramaId: number | null | undefined): Promise<string> {
+/** 查询当前用户项目绑定的风格预设英文提示词片段；查不到返回 '' */
+export async function getDramaStylePrompt(dramaId: number | null | undefined, userId: number): Promise<string> {
   if (!dramaId) return ''
-  const [drama] = await db.select().from(schema.dramas).where(eq(schema.dramas.id, dramaId))
+  const [drama] = await db.select().from(schema.dramas)
+    .where(and(eq(schema.dramas.id, dramaId), eq(schema.dramas.userId, userId)))
   if (!drama?.style) return ''
   const [preset] = await db.select().from(schema.stylePresets)
-    .where(and(eq(schema.stylePresets.value, drama.style), eq(schema.stylePresets.isActive, true)))
+    .where(and(eq(schema.stylePresets.userId, drama.userId), eq(schema.stylePresets.value, drama.style), eq(schema.stylePresets.isActive, true)))
   return preset?.prompt || ''
 }

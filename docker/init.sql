@@ -1,17 +1,32 @@
 -- ============================================================================
 -- Huobao Drama 初始化 SQL
 -- 由 backend/scripts/export-init-sql.ts 从 backend/src/db/mysql-schema.ts 生成
--- 生成时间: 2026-08-08T15:10:25.386Z
+-- 生成时间: 2026-08-27T10:28:26.408Z
 --
--- 注意: 应用启动时会自动执行同等初始化(幂等),本文件不是部署必需,
---       仅供 DBA 审核或在应用外预建表使用
+-- 用途: 在全新 MySQL 8.0+ 服务器上创建数据库与当前完整表结构。
+-- 默认风格预设由应用在用户注册或历史账号初始化时按用户写入。
 -- ============================================================================
 
 SET NAMES utf8mb4;
+CREATE DATABASE IF NOT EXISTS `huobao_drama`
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+USE `huobao_drama`;
 
 -- ----------------------------------------------------------------------------
--- 1. 建表(17 张)
+-- 1. 建表(18 张)
 -- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS users (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(255) NOT NULL,
+    display_name VARCHAR(64) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    UNIQUE KEY uk_users_email (email)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS dramas (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -294,10 +309,79 @@ CREATE TABLE IF NOT EXISTS assets (
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
--- 2. 种子数据: 风格预设(幂等,只补缺失行)
+-- 2. 当前版本增量结构
+-- 说明: 此文件面向空数据库，以下语句在基础表上补齐多用户字段与索引。
 -- ----------------------------------------------------------------------------
-INSERT INTO `style_presets` (`name`, `value`, `prompt`, `description`, `sort_order`, `is_active`, `created_at`, `updated_at`) SELECT '3D 漫剧', '3d', '3D CG animation style, game-engine quality render, semi-realistic stylized characters, refined facial features, detailed materials and textures, cinematic lighting, high detail', '游戏引擎级 3D 渲染，半写实角色，当前短剧主流的 3D 漫剧质感', 1, 1, '2026-08-08T15:10:25.385Z', '2026-08-08T15:10:25.386Z' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `style_presets` WHERE `value` = '3d');
-INSERT INTO `style_presets` (`name`, `value`, `prompt`, `description`, `sort_order`, `is_active`, `created_at`, `updated_at`) SELECT '日漫赛璐璐', 'anime', 'Japanese anime style, cel shading, clean crisp line art, vivid saturated colors, expressive character designs, detailed painted backgrounds', '日式赛璐璐动画风格', 2, 1, '2026-08-08T15:10:25.386Z', '2026-08-08T15:10:25.386Z' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `style_presets` WHERE `value` = 'anime');
-INSERT INTO `style_presets` (`name`, `value`, `prompt`, `description`, `sort_order`, `is_active`, `created_at`, `updated_at`) SELECT '吉卜力手绘', 'ghibli', 'Studio Ghibli style, hand-drawn animation, soft watercolor painted backgrounds, warm nostalgic lighting, gentle natural palette, whimsical cozy atmosphere', '吉卜力手绘治愈风', 3, 1, '2026-08-08T15:10:25.386Z', '2026-08-08T15:10:25.386Z' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `style_presets` WHERE `value` = 'ghibli');
-INSERT INTO `style_presets` (`name`, `value`, `prompt`, `description`, `sort_order`, `is_active`, `created_at`, `updated_at`) SELECT '水彩绘本', 'watercolor', 'watercolor illustration style, soft translucent washes, visible paper texture, delicate fluid brushwork, light airy atmosphere, hand-painted storybook feel', '水彩插画质感', 4, 1, '2026-08-08T15:10:25.386Z', '2026-08-08T15:10:25.386Z' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `style_presets` WHERE `value` = 'watercolor');
-INSERT INTO `style_presets` (`name`, `value`, `prompt`, `description`, `sort_order`, `is_active`, `created_at`, `updated_at`) SELECT '美式漫画', 'comic', 'Western comic book style, bold black ink outlines, halftone dot shading, dynamic saturated colors, dramatic contrast lighting, flat graphic novel look', '美式漫画粗线条风格', 5, 1, '2026-08-08T15:10:25.386Z', '2026-08-08T15:10:25.386Z' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `style_presets` WHERE `value` = 'comic');
+ALTER TABLE `dramas` ADD COLUMN user_id INT NULL;
+
+ALTER TABLE `episodes` ADD COLUMN user_id INT NULL;
+
+ALTER TABLE `characters` ADD COLUMN user_id INT NULL;
+
+ALTER TABLE `scenes` ADD COLUMN user_id INT NULL;
+
+ALTER TABLE `storyboards` ADD COLUMN user_id INT NULL;
+
+ALTER TABLE `props` ADD COLUMN user_id INT NULL;
+
+ALTER TABLE `sys_task` ADD COLUMN user_id INT NULL;
+
+ALTER TABLE `video_merges` ADD COLUMN user_id INT NULL;
+
+ALTER TABLE `assets` ADD COLUMN user_id INT NULL;
+
+ALTER TABLE `ai_service_configs` ADD COLUMN user_id INT NULL;
+
+ALTER TABLE `style_presets` ADD COLUMN user_id INT NULL;
+
+CREATE INDEX idx_dramas_user_id ON `dramas` (user_id);
+
+CREATE INDEX idx_episodes_user_id ON `episodes` (user_id);
+
+CREATE INDEX idx_characters_user_id ON `characters` (user_id);
+
+CREATE INDEX idx_scenes_user_id ON `scenes` (user_id);
+
+CREATE INDEX idx_storyboards_user_id ON `storyboards` (user_id);
+
+CREATE INDEX idx_props_user_id ON `props` (user_id);
+
+CREATE INDEX idx_sys_task_user_id ON `sys_task` (user_id);
+
+CREATE INDEX idx_video_merges_user_id ON `video_merges` (user_id);
+
+CREATE INDEX idx_assets_user_id ON `assets` (user_id);
+
+CREATE INDEX idx_ai_service_configs_user_id ON `ai_service_configs` (user_id);
+
+CREATE INDEX idx_style_presets_user_id ON `style_presets` (user_id);
+
+ALTER TABLE style_presets DROP INDEX uk_style_presets_value;
+
+ALTER TABLE style_presets ADD UNIQUE KEY uk_style_presets_user_value (user_id, value);
+
+CREATE TABLE IF NOT EXISTS user_agent_configs (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    agent_type VARCHAR(64) NOT NULL,
+    model TEXT,
+    system_prompt TEXT NOT NULL,
+    created_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    UNIQUE KEY uk_user_agent_configs_user_type (user_id, agent_type),
+    INDEX idx_user_agent_configs_user_id (user_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_agent_skills (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    agent_type VARCHAR(64) NOT NULL,
+    skill_id VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    content TEXT NOT NULL,
+    created_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    UNIQUE KEY uk_user_agent_skills_user_skill (user_id, skill_id),
+    INDEX idx_user_agent_skills_user_id (user_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

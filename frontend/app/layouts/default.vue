@@ -25,6 +25,11 @@
           <span>设置</span>
         </NuxtLink>
       </nav>
+
+      <div class="account">
+        <div class="account-copy"><strong>{{ user?.display_name }}</strong><span>{{ user?.email }}</span></div>
+        <button class="logout-button" title="退出登录" @click="logout"><LogOut :size="16" :stroke-width="1.8" /></button>
+      </div>
     </header>
 
     <!-- AI 服务未配置引导横幅(缺任一类型即提示) -->
@@ -41,11 +46,12 @@
 </template>
 
 <script setup>
-import { LayoutGrid, Settings, TriangleAlert } from 'lucide-vue-next'
+import { LayoutGrid, LogOut, Settings, TriangleAlert } from 'lucide-vue-next'
 import { aiConfigAPI } from '~/composables/useApi'
 import brandLogo from '~/assets/huobao-logo.png'
 
 const route = useRoute()
+const { user, logout } = useAuth()
 const showBrandImage = ref(true)
 
 const SERVICE_TYPE_LABELS = { text: '文本', image: '图片', video: '视频' }
@@ -135,6 +141,13 @@ watch(() => route.path, checkAiConfigs)
   border-radius: var(--radius-pill);
   background: rgba(0,0,0,0.05);
 }
+.account { margin-left:auto; display:flex; align-items:center; gap:10px; min-width:0; }
+.account-copy { display:flex; flex-direction:column; align-items:flex-end; min-width:0; line-height:1.2; }
+.account-copy strong { max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-1); font-size:12px; font-weight:650; letter-spacing:0; }
+.account-copy span { max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-3); font-size:10px; letter-spacing:0; }
+.logout-button { width:32px; height:32px; display:grid; place-items:center; flex:none; border:0; border-radius:7px; background:transparent; color:var(--text-2); cursor:pointer; }
+.logout-button:hover { background:var(--bg-hover); color:var(--text-0); }
+.logout-button:focus-visible { outline:none; box-shadow:0 0 0 3px var(--button-focus); }
 .nav-link {
   display: flex; align-items: center; gap: 6px;
   min-height: 32px;
@@ -178,4 +191,9 @@ watch(() => route.path, checkAiConfigs)
 
 /* Content */
 .content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+@media (max-width: 720px) {
+  .header { padding:0 12px; gap:10px; }
+  .brand-text, .account-copy { display:none; }
+  .nav-link { padding:0 11px; }
+}
 </style>

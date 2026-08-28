@@ -3,8 +3,20 @@
  */
 import { mysqlTable, text, int, double, boolean, primaryKey, varchar } from 'drizzle-orm/mysql-core'
 
+/** 用户是所有私有业务数据的根归属。密码哈希绝不返回给前端。 */
+export const users = mysqlTable('users', {
+  id: int('id').primaryKey().autoincrement(),
+  email: varchar('email', { length: 255 }).notNull(),
+  displayName: varchar('display_name', { length: 64 }).notNull(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: varchar('created_at', { length: 64 }).notNull(),
+  updatedAt: varchar('updated_at', { length: 64 }).notNull(),
+})
+
 export const dramas = mysqlTable('dramas', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   title: text('title').notNull(),
   description: text('description'),
   genre: text('genre'),
@@ -23,6 +35,7 @@ export const dramas = mysqlTable('dramas', {
 
 export const episodes = mysqlTable('episodes', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   dramaId: int('drama_id').notNull(),
   episodeNumber: int('episode_number').notNull(),
   title: text('title').notNull(),
@@ -43,6 +56,7 @@ export const episodes = mysqlTable('episodes', {
 
 export const characters = mysqlTable('characters', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   dramaId: int('drama_id').notNull(),
   name: text('name').notNull(),
   role: text('role'),
@@ -87,6 +101,7 @@ export const episodeProps = mysqlTable('episode_props', {
 
 export const scenes = mysqlTable('scenes', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   dramaId: int('drama_id').notNull(),
   episodeId: int('episode_id'),
   location: text('location').notNull(),
@@ -105,6 +120,7 @@ export const scenes = mysqlTable('scenes', {
 
 export const storyboards = mysqlTable('storyboards', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   episodeId: int('episode_id').notNull(),
   sceneId: int('scene_id'),
   storyboardNumber: int('storyboard_number').notNull(),
@@ -151,6 +167,7 @@ export const storyboardProps = mysqlTable('storyboard_props', {
 
 export const aiServiceConfigs = mysqlTable('ai_service_configs', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   serviceType: varchar('service_type', { length: 64 }).notNull(),
   provider: varchar('provider', { length: 64 }),
   name: text('name').notNull(),
@@ -184,6 +201,7 @@ export const aiServiceProviders = mysqlTable('ai_service_providers', {
 
 export const stylePresets = mysqlTable('style_presets', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   name: varchar('name', { length: 64 }).notNull(),
   value: varchar('value', { length: 64 }).notNull(),
   prompt: text('prompt').notNull(),
@@ -198,6 +216,7 @@ export const stylePresets = mysqlTable('style_presets', {
 // 统一生成任务表：图片/视频生成共用，type 区分，生成参数存 params(JSON)
 export const sysTask = mysqlTable('sys_task', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   type: varchar('type', { length: 16 }).notNull(), // image | video
   storyboardId: int('storyboard_id'),
   dramaId: int('drama_id'),
@@ -222,6 +241,7 @@ export const sysTask = mysqlTable('sys_task', {
 
 export const videoMerges = mysqlTable('video_merges', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   episodeId: int('episode_id'),
   dramaId: int('drama_id'),
   title: text('title'),
@@ -240,6 +260,7 @@ export const videoMerges = mysqlTable('video_merges', {
 
 export const props = mysqlTable('props', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   dramaId: int('drama_id').notNull(),
   name: text('name').notNull(),
   type: text('type'),
@@ -256,6 +277,7 @@ export const props = mysqlTable('props', {
 
 export const assets = mysqlTable('assets', {
   id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
   dramaId: int('drama_id'),
   episodeId: int('episode_id'),
   storyboardId: int('storyboard_id'),
@@ -280,4 +302,28 @@ export const assets = mysqlTable('assets', {
   createdAt: varchar('created_at', { length: 64 }).notNull(),
   updatedAt: varchar('updated_at', { length: 64 }).notNull(),
   deletedAt: varchar('deleted_at', { length: 64 }),
+})
+
+/** 用户针对单个 Agent 保存的模型覆盖和系统提示词。 */
+export const userAgentConfigs = mysqlTable('user_agent_configs', {
+  id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
+  agentType: varchar('agent_type', { length: 64 }).notNull(),
+  model: text('model'),
+  systemPrompt: text('system_prompt').notNull(),
+  createdAt: varchar('created_at', { length: 64 }).notNull(),
+  updatedAt: varchar('updated_at', { length: 64 }).notNull(),
+})
+
+/** 用户私有 Agent Skill；不再直接写入共享 workspace 目录。 */
+export const userAgentSkills = mysqlTable('user_agent_skills', {
+  id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
+  agentType: varchar('agent_type', { length: 64 }).notNull(),
+  skillId: varchar('skill_id', { length: 255 }).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  content: text('content').notNull(),
+  createdAt: varchar('created_at', { length: 64 }).notNull(),
+  updatedAt: varchar('updated_at', { length: 64 }).notNull(),
 })

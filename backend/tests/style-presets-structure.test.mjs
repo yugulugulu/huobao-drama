@@ -45,12 +45,12 @@ test('drama style prompt is injected into image prompt composition', () => {
 
   assert.match(service, /getDramaStylePrompt/)
   assert.match(service, /stylePresets\.value, drama\.style/)
-  assert.match(gridTools, /getDramaStylePrompt\(dramaId\)/)
+  assert.match(gridTools, /getDramaStylePrompt\(dramaId, userId\)/)
   // 保存最终提示词时由工具拼接项目视觉风格（风格片段置于最前方）
   assert.match(gridTools, /stylePrompt \? `\$\{stylePrompt\}, \$\{prompt\}` : prompt/)
   assert.match(characters, /getDramaStylePrompt/)
   assert.match(characters, /characterImagePrompt\(char, stylePrompt\)/)
-  assert.match(scenes, /getDramaStylePrompt\(scene\.dramaId\)/)
+  assert.match(scenes, /getDramaStylePrompt\(scene\.dramaId, userId\)/)
 })
 
 test('agent default prompts no longer hardcode consistent art style', () => {

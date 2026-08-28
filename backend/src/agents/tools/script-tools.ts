@@ -5,19 +5,26 @@
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 import { db, schema } from '../../db/index.js'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { now } from '../../utils/response.js'
-import { getEpisodeId } from '../context.js'
+import { getEpisodeId, getUserId } from '../context.js'
+
+function getRequestIds(context: Parameters<NonNullable<Parameters<typeof createTool>[0]['execute']>>[1]) {
+  const userId = getUserId(context?.requestContext)
+  const episodeId = getEpisodeId(context?.requestContext)
+  return userId && episodeId ? { userId, episodeId } : null
+}
 
 const readEpisodeScript = createTool({
   id: 'read_episode_script',
   description: 'Read the script content of the current episode.',
   inputSchema: z.object({}),
   execute: async (_input, context) => {
-    const episodeId = getEpisodeId(context?.requestContext)
-    if (!episodeId) return { error: 'Missing episodeId in request context' }
+    const ids = getRequestIds(context)
+    if (!ids) return { error: 'Missing userId/episodeId in request context' }
+    const { userId, episodeId } = ids
     const [ep] = await db.select().from(schema.episodes)
-      .where(eq(schema.episodes.id, episodeId))
+      .where(and(eq(schema.episodes.id, episodeId), eq(schema.episodes.userId, userId)))
     if (!ep) return { error: `Episode not found (id=${episodeId})` }
     const content = ep.content || ep.scriptContent
     if (!content) return { error: `Episode has no content (id=${episodeId})` }
@@ -32,10 +39,11 @@ const rewriteToScreenplay = createTool({
     instructions: z.string().optional().describe('Additional rewrite instructions'),
   }),
   execute: async ({ instructions }, context) => {
-    const episodeId = getEpisodeId(context?.requestContext)
-    if (!episodeId) return { error: 'Missing episodeId in request context' }
+    const ids = getRequestIds(context)
+    if (!ids) return { error: 'Missing userId/episodeId in request context' }
+    const { userId, episodeId } = ids
     const [ep] = await db.select().from(schema.episodes)
-      .where(eq(schema.episodes.id, episodeId))
+      .where(and(eq(schema.episodes.id, episodeId), eq(schema.episodes.userId, userId)))
     if (!ep) return { error: `Episode not found` }
     const source = ep.content || ep.scriptContent
     if (!source) return { error: `Episode has no content to rewrite` }
@@ -65,11 +73,12 @@ const saveScript = createTool({
     content: z.string().describe('The formatted screenplay content to save'),
   }),
   execute: async ({ content }, context) => {
-    const episodeId = getEpisodeId(context?.requestContext)
-    if (!episodeId) return { error: 'Missing episodeId in request context' }
+    const ids = getRequestIds(context)
+    if (!ids) return { error: 'Missing userId/episodeId in request context' }
+    const { userId, episodeId } = ids
     await db.update(schema.episodes)
       .set({ scriptContent: content, updatedAt: now() })
-      .where(eq(schema.episodes.id, episodeId))
+      .where(and(eq(schema.episodes.id, episodeId), eq(schema.episodes.userId, userId)))
 
     return { message: `Script saved`, word_count: content.length }
   },

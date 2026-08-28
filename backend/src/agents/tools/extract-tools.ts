@@ -14,7 +14,7 @@ import { db, getInsertId, schema } from '../../db/index.js'
 import { eq, and } from 'drizzle-orm'
 import { now } from '../../utils/response.js'
 import { logTaskProgress, logTaskSuccess } from '../../utils/task-logger.js'
-import { getDramaId, getEpisodeId } from '../context.js'
+import { getDramaId, getEpisodeId, getUserId } from '../context.js'
 
 // ─── 关联辅助 ────────────────────────────────────────────────
 async function linkCharToEpisode(episodeId: number, characterId: number) {
@@ -66,11 +66,12 @@ function normalizeLocation(loc: string): string {
 
 type ToolContext = ToolExecutionContext | undefined
 
-function requireIds(context: ToolContext): { episodeId: number; dramaId: number } | { error: string } {
+function requireIds(context: ToolContext): { userId: number; episodeId: number; dramaId: number } | { error: string } {
+  const userId = getUserId(context?.requestContext)
   const episodeId = getEpisodeId(context?.requestContext)
   const dramaId = getDramaId(context?.requestContext)
-  if (!episodeId || !dramaId) return { error: 'Missing episodeId/dramaId in request context' }
-  return { episodeId, dramaId }
+  if (!userId || !episodeId || !dramaId) return { error: 'Missing userId/episodeId/dramaId in request context' }
+  return { userId, episodeId, dramaId }
 }
 
 // 1. 读取剧本内容
@@ -81,9 +82,9 @@ const readScriptForExtraction = createTool({
   execute: async (_input, context) => {
     const ids = requireIds(context)
     if ('error' in ids) return ids
-    const { episodeId, dramaId } = ids
+    const { userId, episodeId, dramaId } = ids
     const [ep] = await db.select().from(schema.episodes)
-      .where(eq(schema.episodes.id, episodeId))
+      .where(and(eq(schema.episodes.id, episodeId), eq(schema.episodes.userId, userId)))
     if (!ep) return { error: 'Episode not found' }
     const content = ep.scriptContent || ep.content
     if (!content) return { error: 'Episode has no script content' }
@@ -100,12 +101,12 @@ const readExistingCharacters = createTool({
   execute: async (_input, context) => {
     const ids = requireIds(context)
     if ('error' in ids) return ids
-    const { episodeId, dramaId } = ids
+    const { userId, episodeId, dramaId } = ids
     const links = await db.select().from(schema.episodeCharacters)
       .where(eq(schema.episodeCharacters.episodeId, episodeId))
     const linkedIds = new Set(links.map(link => link.characterId))
     const chars = (await db.select().from(schema.characters)
-      .where(eq(schema.characters.dramaId, dramaId)))
+      .where(and(eq(schema.characters.userId, userId), eq(schema.characters.dramaId, dramaId))))
       .filter(c => !c.deletedAt)
     const visibleChars = chars.map(c => ({
       id: c.id,
@@ -138,12 +139,12 @@ const readExistingScenes = createTool({
   execute: async (_input, context) => {
     const ids = requireIds(context)
     if ('error' in ids) return ids
-    const { episodeId, dramaId } = ids
+    const { userId, episodeId, dramaId } = ids
     const links = await db.select().from(schema.episodeScenes)
       .where(eq(schema.episodeScenes.episodeId, episodeId))
     const linkedIds = new Set(links.map(link => link.sceneId))
     const scenes = (await db.select().from(schema.scenes)
-      .where(eq(schema.scenes.dramaId, dramaId)))
+      .where(and(eq(schema.scenes.userId, userId), eq(schema.scenes.dramaId, dramaId))))
       .filter(s => !s.deletedAt)
     const visibleScenes = scenes.map(s => ({
       id: s.id,
@@ -184,7 +185,7 @@ const saveDedupCharacters = createTool({
   execute: async ({ characters }, context) => {
     const ids = requireIds(context)
     if ('error' in ids) return ids
-    const { episodeId, dramaId } = ids
+    const { userId, episodeId, dramaId } = ids
     const ts = now()
     const results = { created: 0, merged: 0 }
     logTaskProgress('ExtractTool', 'save-characters-begin', {
@@ -195,7 +196,7 @@ const saveDedupCharacters = createTool({
 
     for (const char of characters) {
       const charsInProject = (await db.select().from(schema.characters)
-        .where(eq(schema.characters.dramaId, dramaId)))
+        .where(and(eq(schema.characters.userId, userId), eq(schema.characters.dramaId, dramaId))))
         .filter(c => !c.deletedAt)
       const exact = charsInProject.find(c => c.name === char.name)
       const normName = normalizeName(char.name)
@@ -212,12 +213,13 @@ const saveDedupCharacters = createTool({
           appearance: char.appearance || existing.appearance,
           styling: char.styling || char.description || existing.styling,
           updatedAt: ts,
-        }).where(eq(schema.characters.id, existing.id))
+        }).where(and(eq(schema.characters.id, existing.id), eq(schema.characters.userId, userId)))
         await linkCharToEpisode(episodeId, existing.id)
         results.merged++
       } else {
         // 新增角色
         const res = await db.insert(schema.characters).values({
+          userId,
           name: char.name,
           role: char.role || '',
           description: char.description || '',
@@ -258,7 +260,7 @@ const saveDedupScenes = createTool({
   execute: async ({ scenes }, context) => {
     const ids = requireIds(context)
     if ('error' in ids) return ids
-    const { episodeId, dramaId } = ids
+    const { userId, episodeId, dramaId } = ids
     const ts = now()
     const results = { created: 0, reused: 0 }
     logTaskProgress('ExtractTool', 'save-scenes-begin', {
@@ -270,7 +272,7 @@ const saveDedupScenes = createTool({
     for (const scene of scenes) {
       // 按地点+时间段精确匹配；地点仅做空白/大小写归一化（不删括号，避免误合并）
       const scenesInProject = (await db.select().from(schema.scenes)
-        .where(eq(schema.scenes.dramaId, dramaId)))
+        .where(and(eq(schema.scenes.userId, userId), eq(schema.scenes.dramaId, dramaId))))
         .filter(s => !s.deletedAt)
       const normLocation = normalizeLocation(scene.location)
       const existing = scenesInProject.find(s => s.location === scene.location && s.time === (scene.time || ''))
@@ -282,11 +284,12 @@ const saveDedupScenes = createTool({
           prompt: scene.prompt || scene.description || existing.prompt,
           lighting: scene.lighting || existing.lighting,
           updatedAt: ts,
-        }).where(eq(schema.scenes.id, existing.id))
+        }).where(and(eq(schema.scenes.id, existing.id), eq(schema.scenes.userId, userId)))
         await linkSceneToEpisode(episodeId, existing.id)
         results.reused++
       } else {
         const res = await db.insert(schema.scenes).values({
+          userId,
           dramaId,
           location: scene.location,
           time: scene.time || '',
@@ -318,12 +321,12 @@ const readExistingProps = createTool({
   execute: async (_input, context) => {
     const ids = requireIds(context)
     if ('error' in ids) return ids
-    const { episodeId, dramaId } = ids
+    const { userId, episodeId, dramaId } = ids
     const links = await db.select().from(schema.episodeProps)
       .where(eq(schema.episodeProps.episodeId, episodeId))
     const linkedIds = new Set(links.map(link => link.propId))
     const props = (await db.select().from(schema.props)
-      .where(eq(schema.props.dramaId, dramaId)))
+      .where(and(eq(schema.props.userId, userId), eq(schema.props.dramaId, dramaId))))
       .filter(p => !p.deletedAt)
     const visibleProps = props.map(p => ({
       id: p.id,
@@ -361,7 +364,7 @@ const saveDedupProps = createTool({
   execute: async ({ props }, context) => {
     const ids = requireIds(context)
     if ('error' in ids) return ids
-    const { episodeId, dramaId } = ids
+    const { userId, episodeId, dramaId } = ids
     const ts = now()
     const results = { created: 0, merged: 0 }
     logTaskProgress('ExtractTool', 'save-props-begin', {
@@ -372,7 +375,7 @@ const saveDedupProps = createTool({
 
     for (const prop of props) {
       const propsInProject = (await db.select().from(schema.props)
-        .where(eq(schema.props.dramaId, dramaId)))
+        .where(and(eq(schema.props.userId, userId), eq(schema.props.dramaId, dramaId))))
         .filter(p => !p.deletedAt)
       const exact = propsInProject.find(p => p.name === prop.name)
       const normName = normalizeName(prop.name)
@@ -388,11 +391,12 @@ const saveDedupProps = createTool({
           description: prop.description || existing.description,
           finalPrompt: prop.description ? null : existing.finalPrompt,
           updatedAt: ts,
-        }).where(eq(schema.props.id, existing.id))
+        }).where(and(eq(schema.props.id, existing.id), eq(schema.props.userId, userId)))
         await linkPropToEpisode(episodeId, existing.id)
         results.merged++
       } else {
         const res = await db.insert(schema.props).values({
+          userId,
           name: prop.name,
           type: prop.type || '',
           description: prop.description || '',

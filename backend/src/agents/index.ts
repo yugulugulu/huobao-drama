@@ -200,9 +200,9 @@ function createThinkingOffFetch(providerName: string, baseURL: string): typeof f
   }
 }
 
-async function getModel(fileModel: string | undefined, modelOverride?: string, textConfigId?: number) {
+async function getModel(userId: number, fileModel: string | undefined, modelOverride?: string, textConfigId?: number) {
   // 请求可指定文本配置（含其 provider/baseUrl/apiKey），否则回退到当前启用配置
-  const textConfig = (textConfigId ? await getConfigById(textConfigId) : null) || await getTextConfig()
+  const textConfig = (textConfigId ? await getConfigById(textConfigId, userId) : null) || await getTextConfig(userId)
   const modelName = modelOverride || fileModel || textConfig.model
   const providerName = textConfig.provider.toLowerCase()
   const resolvedBaseURL = getTextProviderBaseUrl(textConfig)
@@ -246,11 +246,13 @@ const AGENT_TOOLS: Record<string, Record<string, any>> = {
 
 /** instructions 按请求解析：prompt 文件（或默认）+ 技能全文拼接 */
 function buildInstructions(type: string) {
-  return async () => {
+  return async ({ requestContext }: { requestContext?: RequestContext }) => {
+    const userId = requestContext?.get('userId' as never) as number | undefined
+    if (!userId) throw new Error('Agent 请求缺少用户上下文')
     const defaults = DEFAULT_PROMPTS[type]
-    const promptFile = await loadAgentPromptFile(type)
+    const promptFile = await loadAgentPromptFile(userId, type)
     const baseInstructions = promptFile?.instructions || defaults.instructions
-    const skillInstructions = await loadAgentSkills(type)
+    const skillInstructions = await loadAgentSkills(userId, type)
     return skillInstructions
       ? [baseInstructions, '', skillInstructions].join('\n')
       : baseInstructions
@@ -260,10 +262,12 @@ function buildInstructions(type: string) {
 /** model 按请求解析：prompt 文件 frontmatter + RequestContext 的 modelOverride/textConfigId 覆盖 */
 function buildModel(type: string) {
   return async ({ requestContext }: { requestContext?: RequestContext }) => {
-    const promptFile = await loadAgentPromptFile(type)
     const modelOverride = requestContext?.get('modelOverride' as never) as string | undefined
     const textConfigId = requestContext?.get('textConfigId' as never) as number | undefined
-    return getModel(promptFile?.model || undefined, modelOverride, textConfigId)
+    const userId = requestContext?.get('userId' as never) as number | undefined
+    if (!userId) throw new Error('Agent 请求缺少用户上下文')
+    const promptFile = await loadAgentPromptFile(userId, type)
+    return getModel(userId, promptFile?.model || undefined, modelOverride, textConfigId)
   }
 }
 

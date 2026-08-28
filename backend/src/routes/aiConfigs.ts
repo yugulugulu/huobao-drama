@@ -1,11 +1,12 @@
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, notFound, created, badRequest, now } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { joinProviderUrl } from '../services/adapters/url.js'
 import { isOfficialProvider } from '../services/ai.js'
 import { redactUrl, logTaskError, logTaskProgress, logTaskSuccess } from '../utils/task-logger.js'
+import { currentUser } from '../middleware/auth.js'
 
 const app = new Hono()
 
@@ -47,6 +48,14 @@ function buildProbe(serviceType: string, provider: string, baseUrl: string, mode
   }
 
   if (p === 'openai') {
+    if (serviceType === 'video') {
+      return {
+        method: 'POST',
+        url: joinProviderUrl(baseUrl, '/v1', '/video/generations'),
+        headers: bearerHeaders(apiKey, true),
+        body: {},
+      }
+    }
     return {
       method: 'GET',
       url: joinProviderUrl(baseUrl, '/v1', '/models'),
@@ -80,7 +89,8 @@ function buildProbe(serviceType: string, provider: string, baseUrl: string, mode
 // GET /ai-configs?service_type=text
 app.get('/', async (c) => {
   const serviceType = c.req.query('service_type')
-  let rows = await db.select().from(schema.aiServiceConfigs)
+  const userId = currentUser(c).id
+  let rows = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.userId, userId))
   if (serviceType) rows = rows.filter(r => r.serviceType === serviceType)
 
   const parsed = rows.map(r => ({
@@ -93,6 +103,7 @@ app.get('/', async (c) => {
 // POST /ai-configs
 app.post('/', async (c) => {
   const body = await c.req.json()
+  const userId = currentUser(c).id
   const ts = now()
 
   // 验证必填字段
@@ -104,6 +115,7 @@ app.post('/', async (c) => {
   }
 
   const res = await db.insert(schema.aiServiceConfigs).values({
+    userId,
     serviceType: body.service_type,
     provider: body.provider,
     name: body.name || `${body.provider}-${body.service_type}`,
@@ -117,7 +129,7 @@ app.post('/', async (c) => {
   })
 
   const [row] = await db.select().from(schema.aiServiceConfigs)
-    .where(eq(schema.aiServiceConfigs.id, getInsertId(res)))
+    .where(and(eq(schema.aiServiceConfigs.id, getInsertId(res)), eq(schema.aiServiceConfigs.userId, userId)))
 
   return created(c, {
     ...toSnakeCase(row),
@@ -200,7 +212,8 @@ app.post('/test', async (c) => {
 // GET /ai-configs/:id
 app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
-  const [row] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, id))
+  const userId = currentUser(c).id
+  const [row] = await db.select().from(schema.aiServiceConfigs).where(and(eq(schema.aiServiceConfigs.id, id), eq(schema.aiServiceConfigs.userId, userId)))
   if (!row) return notFound(c)
   return success(c, {
     ...toSnakeCase(row),
@@ -211,8 +224,9 @@ app.get('/:id', async (c) => {
 // PUT /ai-configs/:id
 app.put('/:id', async (c) => {
   const id = Number(c.req.param('id'))
+  const userId = currentUser(c).id
   const body = await c.req.json()
-  const [existing] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, id))
+  const [existing] = await db.select().from(schema.aiServiceConfigs).where(and(eq(schema.aiServiceConfigs.id, id), eq(schema.aiServiceConfigs.userId, userId)))
   if (!existing) return notFound(c)
 
   const serviceType = 'service_type' in body ? body.service_type : existing.serviceType
@@ -232,14 +246,15 @@ app.put('/:id', async (c) => {
   if ('priority' in body) updates.priority = body.priority
   if ('is_active' in body) updates.isActive = body.is_active
 
-  await db.update(schema.aiServiceConfigs).set(updates).where(eq(schema.aiServiceConfigs.id, id))
+  await db.update(schema.aiServiceConfigs).set(updates).where(and(eq(schema.aiServiceConfigs.id, id), eq(schema.aiServiceConfigs.userId, userId)))
   return success(c)
 })
 
 // DELETE /ai-configs/:id
 app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
-  await db.delete(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, id))
+  const userId = currentUser(c).id
+  await db.delete(schema.aiServiceConfigs).where(and(eq(schema.aiServiceConfigs.id, id), eq(schema.aiServiceConfigs.userId, userId)))
   return success(c)
 })
 

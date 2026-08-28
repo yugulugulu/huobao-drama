@@ -12,7 +12,10 @@ const composeServicePath = new URL('../src/services/ffmpeg-compose.ts', import.m
 test('episode merge uses generated videos directly without requiring compose output', () => {
   assert.doesNotMatch(mergeService, /Only composed storyboards can be merged/)
   assert.match(mergeService, /sb\.videoUrl\s*\|\|\s*sb\.composedVideoUrl/)
-  assert.match(mergeService, /readyVideos\.length !== storyboards\.length/)
+  assert.match(mergeService, /clips\.length === 0/)
+  // 本地和 OSS 均先通过统一存储层物化为 FFmpeg 可读取的本地路径。
+  assert.match(mergeService, /materializeStorageFile\(video\)/)
+  assert.match(mergeService, /saveLocalFile\(outputPath, userId,/)
 })
 
 test('compose workflow is no longer exposed through API surfaces', () => {

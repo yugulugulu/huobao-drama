@@ -18,16 +18,15 @@ export interface ImageProviderAdapter {
   parseGenerateResponse(result: any): ImageGenResponse
 
   /**
-   * 构建轮询请求
+   * Optional because OpenAI Images API completes synchronously from the
+   * generation response and does not expose an image task GET endpoint.
    * @param config AI 配置
    * @param taskId 任务 ID
    */
-  buildPollRequest(config: AIConfig, taskId: string): ProviderRequest
+  buildPollRequest?(config: AIConfig, taskId: string): ProviderRequest
 
-  /**
-   * 解析轮询响应
-   */
-  parsePollResponse(result: any): ImagePollResponse
+  /** 解析异步图片任务响应；同步图片 provider 不实现。 */
+  parsePollResponse?(result: any): ImagePollResponse
 
   /**
    * 从响应中提取图片 URL（用于直接下载）

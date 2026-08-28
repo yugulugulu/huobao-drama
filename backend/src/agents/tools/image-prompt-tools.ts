@@ -11,10 +11,16 @@
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 import { db, schema } from '../../db/index.js'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { now } from '../../utils/response.js'
 import { getDramaStylePrompt } from '../../services/style-preset.js'
-import { getDramaId } from '../context.js'
+import { getDramaId, getUserId } from '../context.js'
+
+function getRequestIds(context: any) {
+  const userId = getUserId(context?.requestContext)
+  const dramaId = getDramaId(context?.requestContext)
+  return userId && dramaId ? { userId, dramaId } : null
+}
 
 // ─── 角色提示词 ───────────────────────────────────────
 
@@ -23,10 +29,11 @@ const readCharacters = createTool({
   description: '读取当前剧集中的所有角色信息，用于生成角色三视图最终提示词。',
   inputSchema: z.object({}),
   execute: async (_input, context) => {
-    const dramaId = getDramaId(context?.requestContext)
-    if (!dramaId) return { error: 'Missing dramaId in request context' }
+    const ids = getRequestIds(context)
+    if (!ids) return { error: 'Missing userId/dramaId in request context' }
+    const { userId, dramaId } = ids
     const chars = (await db.select().from(schema.characters)
-      .where(eq(schema.characters.dramaId, dramaId)))
+      .where(and(eq(schema.characters.userId, userId), eq(schema.characters.dramaId, dramaId))))
       .filter(c => !c.deletedAt)
     return {
       characters: chars.map(c => ({
@@ -50,17 +57,18 @@ const saveCharacterFinalPrompt = createTool({
     prompt: z.string().describe('角色三视图最终提示词（纯中文，不含风格词）'),
   }),
   execute: async ({ character_id, prompt }, context) => {
-    const dramaId = getDramaId(context?.requestContext)
-    if (!dramaId) return { error: 'Missing dramaId in request context' }
+    const ids = getRequestIds(context)
+    if (!ids) return { error: 'Missing userId/dramaId in request context' }
+    const { userId, dramaId } = ids
     const [c] = await db.select().from(schema.characters)
-      .where(eq(schema.characters.id, character_id))
+      .where(and(eq(schema.characters.id, character_id), eq(schema.characters.userId, userId), eq(schema.characters.dramaId, dramaId)))
     if (!c) return { error: 'Character not found' }
 
-    const stylePrompt = await getDramaStylePrompt(dramaId)
+    const stylePrompt = await getDramaStylePrompt(dramaId, userId)
     const finalPrompt = stylePrompt ? `${stylePrompt}, ${prompt}` : prompt
     await db.update(schema.characters)
       .set({ finalPrompt, updatedAt: now() })
-      .where(eq(schema.characters.id, character_id))
+      .where(and(eq(schema.characters.id, character_id), eq(schema.characters.userId, userId), eq(schema.characters.dramaId, dramaId)))
 
     return {
       character_id: c.id,
@@ -78,10 +86,11 @@ const readScenes = createTool({
   description: '读取当前剧集中的所有场景信息，用于生成场景固定视角最终提示词。',
   inputSchema: z.object({}),
   execute: async (_input, context) => {
-    const dramaId = getDramaId(context?.requestContext)
-    if (!dramaId) return { error: 'Missing dramaId in request context' }
+    const ids = getRequestIds(context)
+    if (!ids) return { error: 'Missing userId/dramaId in request context' }
+    const { userId, dramaId } = ids
     const scenes = (await db.select().from(schema.scenes)
-      .where(eq(schema.scenes.dramaId, dramaId)))
+      .where(and(eq(schema.scenes.userId, userId), eq(schema.scenes.dramaId, dramaId))))
       .filter(s => !s.deletedAt)
     return {
       scenes: scenes.map(s => ({
@@ -104,17 +113,18 @@ const saveSceneFinalPrompt = createTool({
     prompt: z.string().describe('场景固定视角最终提示词（纯中文，不含风格词）'),
   }),
   execute: async ({ scene_id, prompt }, context) => {
-    const dramaId = getDramaId(context?.requestContext)
-    if (!dramaId) return { error: 'Missing dramaId in request context' }
+    const ids = getRequestIds(context)
+    if (!ids) return { error: 'Missing userId/dramaId in request context' }
+    const { userId, dramaId } = ids
     const [s] = await db.select().from(schema.scenes)
-      .where(eq(schema.scenes.id, scene_id))
+      .where(and(eq(schema.scenes.id, scene_id), eq(schema.scenes.userId, userId), eq(schema.scenes.dramaId, dramaId)))
     if (!s) return { error: 'Scene not found' }
 
-    const stylePrompt = await getDramaStylePrompt(dramaId)
+    const stylePrompt = await getDramaStylePrompt(dramaId, userId)
     const finalPrompt = stylePrompt ? `${stylePrompt}, ${prompt}` : prompt
     await db.update(schema.scenes)
       .set({ finalPrompt, updatedAt: now() })
-      .where(eq(schema.scenes.id, scene_id))
+      .where(and(eq(schema.scenes.id, scene_id), eq(schema.scenes.userId, userId), eq(schema.scenes.dramaId, dramaId)))
 
     return {
       scene_id: s.id,
@@ -132,10 +142,11 @@ const readProps = createTool({
   description: '读取当前剧集项目中的所有道具信息，用于生成道具白底单品最终提示词。',
   inputSchema: z.object({}),
   execute: async (_input, context) => {
-    const dramaId = getDramaId(context?.requestContext)
-    if (!dramaId) return { error: 'Missing dramaId in request context' }
+    const ids = getRequestIds(context)
+    if (!ids) return { error: 'Missing userId/dramaId in request context' }
+    const { userId, dramaId } = ids
     const props = (await db.select().from(schema.props)
-      .where(eq(schema.props.dramaId, dramaId)))
+      .where(and(eq(schema.props.userId, userId), eq(schema.props.dramaId, dramaId))))
       .filter(p => !p.deletedAt)
     return {
       props: props.map(p => ({
@@ -157,17 +168,18 @@ const savePropFinalPrompt = createTool({
     prompt: z.string().describe('道具白底单品最终提示词（纯中文，不含风格词）'),
   }),
   execute: async ({ prop_id, prompt }, context) => {
-    const dramaId = getDramaId(context?.requestContext)
-    if (!dramaId) return { error: 'Missing dramaId in request context' }
+    const ids = getRequestIds(context)
+    if (!ids) return { error: 'Missing userId/dramaId in request context' }
+    const { userId, dramaId } = ids
     const [p] = await db.select().from(schema.props)
-      .where(eq(schema.props.id, prop_id))
+      .where(and(eq(schema.props.id, prop_id), eq(schema.props.userId, userId), eq(schema.props.dramaId, dramaId)))
     if (!p) return { error: 'Prop not found' }
 
-    const stylePrompt = await getDramaStylePrompt(dramaId)
+    const stylePrompt = await getDramaStylePrompt(dramaId, userId)
     const finalPrompt = stylePrompt ? `${stylePrompt}, ${prompt}` : prompt
     await db.update(schema.props)
       .set({ finalPrompt, updatedAt: now() })
-      .where(eq(schema.props.id, prop_id))
+      .where(and(eq(schema.props.id, prop_id), eq(schema.props.userId, userId), eq(schema.props.dramaId, dramaId)))
 
     return {
       prop_id: p.id,

@@ -1,6 +1,16 @@
 import type { Pool } from 'mysql2/promise'
 
 export const mysqlSchemaStatements = [
+  `CREATE TABLE IF NOT EXISTS users (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(255) NOT NULL,
+    display_name VARCHAR(64) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    UNIQUE KEY uk_users_email (email)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS dramas (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -284,6 +294,60 @@ export const mysqlSchemaStatements = [
 ]
 
 /**
+ * 多用户改造的增量 DDL。
+ * 每条语句都允许重复失败，由下方的兼容执行器忽略已存在字段/索引错误，
+ * 因此旧库和全新库都可在每次启动时安全执行。
+ */
+const tenantTables = ['dramas', 'episodes', 'characters', 'scenes', 'storyboards', 'props', 'sys_task', 'video_merges', 'assets', 'ai_service_configs', 'style_presets']
+
+/**
+ * CREATE TABLE IF NOT EXISTS 不会给存量表补列，因此所有历史版本后新增的字段都必须在这里声明。
+ * 显式记录表名和字段名也便于结构测试确认迁移覆盖范围。
+ */
+export const mysqlColumnBackfillStatements = [
+  { table: 'dramas', column: 'aspect_ratio', sql: "ALTER TABLE `dramas` ADD COLUMN `aspect_ratio` VARCHAR(16) DEFAULT '16:9'" },
+  { table: 'episodes', column: 'resolution', sql: "ALTER TABLE `episodes` ADD COLUMN `resolution` VARCHAR(16) DEFAULT '720p'" },
+  { table: 'characters', column: 'styling', sql: 'ALTER TABLE `characters` ADD COLUMN `styling` TEXT' },
+  { table: 'characters', column: 'final_prompt', sql: 'ALTER TABLE `characters` ADD COLUMN `final_prompt` TEXT' },
+  { table: 'characters', column: 'personality', sql: 'ALTER TABLE `characters` ADD COLUMN `personality` TEXT' },
+  { table: 'scenes', column: 'lighting', sql: 'ALTER TABLE `scenes` ADD COLUMN `lighting` TEXT' },
+  { table: 'scenes', column: 'final_prompt', sql: 'ALTER TABLE `scenes` ADD COLUMN `final_prompt` TEXT' },
+  { table: 'props', column: 'final_prompt', sql: 'ALTER TABLE `props` ADD COLUMN `final_prompt` TEXT' },
+]
+
+export const tenantMigrationStatements = [
+  ...mysqlColumnBackfillStatements.map(({ sql }) => sql),
+  ...tenantTables.map(table => `ALTER TABLE \`${table}\` ADD COLUMN user_id INT NULL`),
+  ...tenantTables.map(table => `CREATE INDEX idx_${table}_user_id ON \`${table}\` (user_id)`),
+  'ALTER TABLE style_presets DROP INDEX uk_style_presets_value',
+  'ALTER TABLE style_presets ADD UNIQUE KEY uk_style_presets_user_value (user_id, value)',
+  `CREATE TABLE IF NOT EXISTS user_agent_configs (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    agent_type VARCHAR(64) NOT NULL,
+    model TEXT,
+    system_prompt TEXT NOT NULL,
+    created_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    UNIQUE KEY uk_user_agent_configs_user_type (user_id, agent_type),
+    INDEX idx_user_agent_configs_user_id (user_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS user_agent_skills (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    agent_type VARCHAR(64) NOT NULL,
+    skill_id VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    content TEXT NOT NULL,
+    created_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    UNIQUE KEY uk_user_agent_skills_user_skill (user_id, skill_id),
+    INDEX idx_user_agent_skills_user_id (user_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+]
+
+/**
  * 风格预设种子数据 — value 存入 dramas.style，prompt 注入生图提示词
  */
 export const stylePresetSeeds = [
@@ -296,16 +360,24 @@ export const stylePresetSeeds = [
 
 // INSERT ... SELECT WHERE NOT EXISTS → 幂等：只补缺失行，不覆盖用户编辑，
 // 且不会像 INSERT IGNORE 那样在每次启动时白白消耗自增 id
-export const mysqlDataSeedStatements = stylePresetSeeds.map((s) => ({
-  sql: 'INSERT INTO `style_presets` (`name`, `value`, `prompt`, `description`, `sort_order`, `is_active`, `created_at`, `updated_at`) SELECT ?, ?, ?, ?, ?, 1, ?, ? FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `style_presets` WHERE `value` = ?)',
-  params: [s.name, s.value, s.prompt, s.description, s.sortOrder, new Date().toISOString(), new Date().toISOString(), s.value],
-}))
+export function stylePresetSeedStatements(userId: number) {
+  return stylePresetSeeds.map((s) => ({
+    // 用户注册与历史迁移均复用此语句，避免覆盖用户已编辑的私有预设。
+    sql: 'INSERT INTO `style_presets` (`user_id`, `name`, `value`, `prompt`, `description`, `sort_order`, `is_active`, `created_at`, `updated_at`) SELECT ?, ?, ?, ?, ?, ?, 1, ?, ? FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `style_presets` WHERE `user_id` = ? AND `value` = ?)',
+    params: [userId, s.name, s.value, s.prompt, s.description, s.sortOrder, new Date().toISOString(), new Date().toISOString(), userId, s.value],
+  }))
+}
 
 export async function initMySqlSchema(pool: Pool) {
   for (const statement of mysqlSchemaStatements) {
     await pool.query(statement)
   }
-  for (const seed of mysqlDataSeedStatements) {
-    await pool.query(seed.sql, seed.params)
+  for (const statement of tenantMigrationStatements) {
+    try {
+      await pool.query(statement)
+    } catch (error: any) {
+      // ER_DUP_FIELDNAME、ER_DUP_KEYNAME 和找不到旧索引均代表该库已完成对应步骤。
+      if (![1060, 1061, 1091].includes(error?.errno)) throw error
+    }
   }
 }

@@ -5,6 +5,7 @@
 import { OpenAIImageAdapter } from './openai-image'
 import { GeminiImageAdapter } from './gemini-image'
 import { VolcEngineImageAdapter } from './volcengine-image'
+import { OpenAIVideoAdapter } from './openai-video'
 import { VolcEngineVideoAdapter } from './volcengine-video'
 import type { ImageProviderAdapter, VideoProviderAdapter } from './types'
 
@@ -17,6 +18,7 @@ export const imageAdapters: Record<string, ImageProviderAdapter> = {
 
 // 视频 Adapter 注册表
 export const videoAdapters: Record<string, VideoProviderAdapter> = {
+  openai: new OpenAIVideoAdapter(),
   volcengine: new VolcEngineVideoAdapter(),
 }
 

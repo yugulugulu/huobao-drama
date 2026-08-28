@@ -47,6 +47,15 @@
           />
         </div>
         <div class="studio-actions">
+          <div class="studio-account" :title="user?.email">
+            <span class="studio-account-name">{{ user?.display_name }}</span>
+            <button class="studio-icon-btn" title="设置中心" aria-label="设置中心" @click="navigateTo('/settings')">
+              <Settings :size="13" />
+            </button>
+            <button class="studio-icon-btn" title="退出登录" aria-label="退出登录" @click="logout">
+              <LogOut :size="13" />
+            </button>
+          </div>
           <button class="btn" @click="refresh">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             刷新
@@ -743,8 +752,8 @@
                   <div class="video-task-preview">
                     <video
                       v-if="hasVid(task.storyboard)"
-                      :src="'/' + getVideoUrl(task.storyboard)"
-                      :poster="posterOf('/' + getVideoUrl(task.storyboard)) || undefined"
+                      :src="mediaSrc(getVideoUrl(task.storyboard))"
+                      :poster="videoPosterSrc(getVideoUrl(task.storyboard)) || undefined"
                       preload="none"
                       playsinline
                       muted
@@ -804,7 +813,7 @@
                   </button>
                   <a
                     v-if="previewVideoUrl || hasVid(selectedSb)"
-                    :href="'/' + (previewVideoUrl || getVideoUrl(selectedSb))"
+                    :href="mediaSrc(previewVideoUrl || getVideoUrl(selectedSb))"
                     download
                     class="btn btn-sm"
                   >
@@ -816,8 +825,8 @@
                   <video
                     v-if="previewVideoUrl || hasVid(selectedSb)"
                     :key="previewVideoUrl || getVideoUrl(selectedSb)"
-                    :src="'/' + (previewVideoUrl || getVideoUrl(selectedSb))"
-                    :poster="posterOf('/' + (previewVideoUrl || getVideoUrl(selectedSb))) || undefined"
+                    :src="mediaSrc(previewVideoUrl || getVideoUrl(selectedSb))"
+                    :poster="videoPosterSrc(previewVideoUrl || getVideoUrl(selectedSb)) || undefined"
                     controls
                     preload="metadata"
                     playsinline
@@ -854,7 +863,7 @@
                     @click="previewHistoryVideo(t)"
                     @keydown.enter.prevent="previewHistoryVideo(t)"
                   >
-                    <video :src="'/' + taskVideoPath(t)" :poster="posterOf('/' + taskVideoPath(t)) || undefined" preload="none" muted playsinline tabindex="-1" />
+                    <video :src="mediaSrc(taskVideoPath(t))" :poster="videoPosterSrc(taskVideoPath(t)) || undefined" preload="none" muted playsinline tabindex="-1" />
                     <span class="video-history-time">{{ formatHistoryTime(taskCreatedAt(t)) }}</span>
                     <span v-if="isCurrentVideo(t)" class="video-history-badge">当前</span>
                     <button v-else type="button" class="video-history-del" title="删除该记录" @click.stop="removeHistoryVideo(t)">×</button>
@@ -1067,8 +1076,8 @@
                   <div class="exp-thumb">
                     <video
                       v-if="hasVid(sb)"
-                      :src="'/' + getVideoUrl(sb)"
-                      :poster="posterOf('/' + getVideoUrl(sb)) || undefined"
+                      :src="mediaSrc(getVideoUrl(sb))"
+                      :poster="videoPosterSrc(getVideoUrl(sb)) || undefined"
                       preload="none"
                       muted
                       playsinline
@@ -1132,7 +1141,7 @@
                 <video
                   v-if="row.previewUrl && (row.kind === 'video' || row.kind === 'merge')"
                   :src="genTaskPreviewSrc(row.previewUrl)"
-                  :poster="posterOf(genTaskPreviewSrc(row.previewUrl)) || undefined"
+                  :poster="videoPosterSrc(row.previewUrl) || undefined"
                   controls
                   preload="none"
                   playsinline
@@ -1544,7 +1553,7 @@
 import { toast } from 'vue-sonner'
 import {
   Users, Video, FileText, FolderKanban, Clapperboard, Download, Loader2,
-  MapPin, Play, Plus, X, ListTodo,
+  MapPin, Play, Plus, X, ListTodo, LogOut, Settings,
 } from 'lucide-vue-next'
 import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, aiConfigAPI, uploadAPI } from '~/composables/useApi'
 import { useAgent } from '~/composables/useAgent'
@@ -1552,6 +1561,7 @@ import { useAgent } from '~/composables/useAgent'
 definePageMeta({ layout: 'studio' })
 
 const route = useRoute()
+const { user, logout } = useAuth()
 const dramaId = Number(route.params.id)
 const episodeNumber = Number(route.params.episodeNumber)
 
@@ -1642,9 +1652,12 @@ persistModel(videoModel, MODEL_STORE_KEYS.video)
 /** 顶栏文本模型覆盖参数：未选择时为 undefined，后端回退到 Agent/文本配置默认 */
 function chatModelOverride() { return chatModel.value || undefined }
 function chatConfigId() { return ownerConfigId(textModelOptions.value, chatModel.value) }
-const pendingCharImageIds = ref([])
-const pendingSceneImageIds = ref([])
-const pendingPropImageIds = ref([])
+const {
+  pendingCharImageIds,
+  pendingSceneImageIds,
+  pendingPropImageIds,
+  pruneExpiredPendingImageAssets,
+} = usePendingImageAssets()
 const pendingVideoIds = ref([])
 const failedVideoMessages = ref({})
 // 任务列表面板：顶栏按钮触发的右侧抽屉,按集聚合 sys_task + video_merges
@@ -1652,6 +1665,7 @@ const genTasks = ref([])
 const genMerges = ref([])
 const taskDrawer = ref(false)
 let genTasksTimer = null
+let genTasksRefreshing = false
 
 function openTaskDrawer() {
   taskDrawer.value = true
@@ -1682,7 +1696,17 @@ function configLabel(config) {
 }
 
 function isPendingCharImage(id) {
-  return pendingCharImageIds.value.includes(id)
+  return pendingCharImageIds.value.includes(id) || hasProcessingImageTask('character', id)
+}
+
+function hasProcessingImageTask(kind, id) {
+  const field = kind === 'character' ? 'character_id' : kind === 'scene' ? 'scene_id' : 'prop_id'
+  const camelField = field.replace(/_([a-z])/g, (_, char) => char.toUpperCase())
+  return genTasks.value.some(task =>
+    task.type === 'image' &&
+    task.status === 'processing' &&
+    Number(task[field] ?? task[camelField]) === Number(id)
+  )
 }
 
 function openImageViewer(src, title = '') {
@@ -1960,7 +1984,7 @@ onBeforeUnmount(() => {
 })
 
 function isPendingSceneImage(id) {
-  return pendingSceneImageIds.value.includes(id)
+  return pendingSceneImageIds.value.includes(id) || hasProcessingImageTask('scene', id)
 }
 
 function isPendingVideo(id) {
@@ -2084,9 +2108,72 @@ function stopGenTasksPolling() {
   if (genTasksTimer) { clearInterval(genTasksTimer); genTasksTimer = null }
 }
 
+function shouldKeepImagePending(kind, id) {
+  const field = kind === 'character' ? 'character_id' : kind === 'scene' ? 'scene_id' : 'prop_id'
+  const camelField = field.replace(/_([a-z])/g, (_, char) => char.toUpperCase())
+  const tasks = genTasks.value.filter(task =>
+    task.type === 'image' &&
+    Number(task[field] ?? task[camelField]) === Number(id)
+  )
+  if (tasks.some(task => task.status === 'processing')) return true
+  const latestTask = tasks.reduce((latest, task) =>
+    !latest || Number(task.id) > Number(latest.id) ? task : latest
+  , null)
+  return !latestTask || !['failed', 'completed'].includes(latestTask.status)
+}
+
+function clearSettledImagePending() {
+  const charIds = pendingCharImageIds.value.filter(id => {
+    const char = chars.value.find(item => item.id === id)
+    if (char?.image_url || char?.imageUrl) return false
+    return shouldKeepImagePending('character', id)
+  })
+  if (charIds.length !== pendingCharImageIds.value.length) pendingCharImageIds.value = charIds
+
+  const sceneIds = pendingSceneImageIds.value.filter(id => {
+    const scene = scenes.value.find(item => item.id === id)
+    if (scene?.image_url || scene?.imageUrl) return false
+    return shouldKeepImagePending('scene', id)
+  })
+  if (sceneIds.length !== pendingSceneImageIds.value.length) pendingSceneImageIds.value = sceneIds
+
+  const propIds = pendingPropImageIds.value.filter(id => {
+    const prop = propItems.value.find(item => item.id === id)
+    if (prop?.image_url || prop?.imageUrl) return false
+    return shouldKeepImagePending('prop', id)
+  })
+  if (propIds.length !== pendingPropImageIds.value.length) pendingPropImageIds.value = propIds
+}
+
+async function pollGenerationState() {
+  if (genTasksRefreshing) return
+  genTasksRefreshing = true
+  try {
+    pruneExpiredPendingImageAssets()
+    const hadActiveTasks = genTaskActiveCount.value > 0
+    await refresh()
+    // sys_task 完成状态早于资产表回写几个毫秒，结束时再刷新一次避免错过图片。
+    if (hadActiveTasks && genTaskActiveCount.value === 0) {
+      await sleep(300)
+      await refresh()
+    }
+    clearSettledImagePending()
+  } finally {
+    genTasksRefreshing = false
+  }
+}
+
 const genTaskActiveCount = computed(() =>
   genTasks.value.filter(t => t.status === 'processing').length +
   genMerges.value.filter(m => m.status === 'processing' || m.status === 'pending').length
+)
+const activeImageTaskCount = computed(() =>
+  genTasks.value.filter(task => task.type === 'image' && task.status === 'processing').length
+)
+const localPendingImageCount = computed(() =>
+  pendingCharImageIds.value.filter(id => chars.value.some(item => item.id === id)).length +
+  pendingSceneImageIds.value.filter(id => scenes.value.some(item => item.id === id)).length +
+  pendingPropImageIds.value.filter(id => propItems.value.some(item => item.id === id)).length
 )
 const genTaskDoneCount = computed(() =>
   genTasks.value.filter(t => t.status === 'completed').length +
@@ -2167,10 +2254,20 @@ function genTaskStateClass(status) {
   return 'pending'
 }
 
-// local_path 为站内相对路径补 '/',远端 result_url 原样使用
-function genTaskPreviewSrc(url) {
+// 站内相对路径补 '/',上游或 OSS 绝对地址原样使用。
+function mediaSrc(url) {
   if (!url) return ''
   return /^https?:\/\//.test(url) ? url : '/' + url
+}
+
+function genTaskPreviewSrc(url) { return mediaSrc(url) }
+
+// 上游视频不保证提供同名海报；只为站内或本项目 OSS 视频推导海报地址。
+function videoPosterSrc(url) {
+  const src = mediaSrc(url)
+  if (!src) return ''
+  if (/^https?:\/\//.test(src) && !/\.oss-[^/]+\.aliyuncs\.com\//i.test(src)) return ''
+  return posterOf(src)
 }
 
 function genTaskDuration(row) {
@@ -2180,13 +2277,15 @@ function genTaskDuration(row) {
   return ms >= 60000 ? `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s` : `${Math.round(ms / 1000)}s`
 }
 
-// 抽屉打开且有进行中任务时,4s 轮询;关闭或全部结束时停止
-watch([taskDrawer, genTaskActiveCount], ([open, active]) => {
+// 图片任务始终刷新资产；其他任务沿用任务抽屉打开时轮询的行为。
+watch([taskDrawer, genTaskActiveCount, activeImageTaskCount, localPendingImageCount], ([drawerOpen, active, activeImages, localPending]) => {
   stopGenTasksPolling()
-  if (open && active > 0) {
+  if (activeImages > 0 || localPending > 0) {
+    genTasksTimer = setInterval(pollGenerationState, 4000)
+  } else if (drawerOpen && active > 0) {
     genTasksTimer = setInterval(loadGenTasks, 4000)
   }
-})
+}, { immediate: true })
 
 const productionBlockMessage = computed(() => {
   if (!scriptContent.value) return '请先完成剧本编写'
@@ -2798,12 +2897,6 @@ async function genCharImg(id) {
     await characterAPI.generateImage(id, epId.value, imageModel.value || undefined, ownerConfigId(imageModelOptions.value, imageModel.value), chatModelOverride(), chatConfigId())
     toast.success('角色图片生成中')
     await refresh()
-    watchAsyncResult(() => {
-      const char = chars.value.find(c => c.id === id)
-      const done = !!(char?.image_url || char?.imageUrl)
-      if (done) pendingCharImageIds.value = pendingCharImageIds.value.filter(item => item !== id)
-      return done
-    })
   } catch (e) {
     pendingCharImageIds.value = pendingCharImageIds.value.filter(item => item !== id)
     toast.error(e.message)
@@ -2816,12 +2909,6 @@ function batchCharImages() {
   characterAPI.batchImages(ids, epId.value, imageModel.value || undefined, ownerConfigId(imageModelOptions.value, imageModel.value), chatModelOverride(), chatConfigId()).then(async () => {
     toast.success('角色图片批量生成中')
     await refresh()
-    watchAsyncResult(() => ids.every(id => {
-      const char = chars.value.find(c => c.id === id)
-      const done = !!(char?.image_url || char?.imageUrl)
-      if (done) pendingCharImageIds.value = pendingCharImageIds.value.filter(item => item !== id)
-      return done
-    }), 36)
   }).catch(e => {
     pendingCharImageIds.value = pendingCharImageIds.value.filter(item => !ids.includes(item))
     toast.error(e.message)
@@ -2840,19 +2927,13 @@ async function genSceneImg(id) {
     await sceneAPI.generateImage(id, epId.value, imageModel.value || undefined, ownerConfigId(imageModelOptions.value, imageModel.value), chatModelOverride(), chatConfigId())
     toast.success('场景图片生成中')
     await refresh()
-    watchAsyncResult(() => {
-      const scene = scenes.value.find(s => s.id === id)
-      const done = !!(scene?.image_url || scene?.imageUrl)
-      if (done) pendingSceneImageIds.value = pendingSceneImageIds.value.filter(item => item !== id)
-      return done
-    })
   } catch (e) {
     pendingSceneImageIds.value = pendingSceneImageIds.value.filter(item => item !== id)
     toast.error(e.message)
   }
 }
 function isPendingPropImage(id) {
-  return pendingPropImageIds.value.includes(id)
+  return pendingPropImageIds.value.includes(id) || hasProcessingImageTask('prop', id)
 }
 async function genPropImg(id) {
   try {
@@ -2867,12 +2948,6 @@ async function genPropImg(id) {
     await propAPI.generateImage(id, epId.value, imageModel.value || undefined, ownerConfigId(imageModelOptions.value, imageModel.value), chatModelOverride(), chatConfigId())
     toast.success('道具图片生成中')
     await refresh()
-    watchAsyncResult(() => {
-      const prop = propItems.value.find(p => p.id === id)
-      const done = !!(prop?.image_url || prop?.imageUrl)
-      if (done) pendingPropImageIds.value = pendingPropImageIds.value.filter(item => item !== id)
-      return done
-    })
   } catch (e) {
     pendingPropImageIds.value = pendingPropImageIds.value.filter(item => item !== id)
     toast.error(e.message)
@@ -2882,27 +2957,29 @@ function batchSceneImages() {
   const ids = scenes.value.filter(s => !(s.image_url || s.imageUrl)).map(s => s.id)
   if (!ids.length) { toast.info('所有场景图片已生成'); return }
   pendingSceneImageIds.value = [...new Set([...pendingSceneImageIds.value, ...ids])]
-  ids.forEach(id => { sceneAPI.generateImage(id, epId.value, imageModel.value || undefined, ownerConfigId(imageModelOptions.value, imageModel.value), chatModelOverride(), chatConfigId()).then(() => refresh()).catch(e => toast.error(e.message)) })
+  ids.forEach(id => {
+    sceneAPI.generateImage(id, epId.value, imageModel.value || undefined, ownerConfigId(imageModelOptions.value, imageModel.value), chatModelOverride(), chatConfigId())
+      .then(() => refresh())
+      .catch(e => {
+        pendingSceneImageIds.value = pendingSceneImageIds.value.filter(item => item !== id)
+        toast.error(e.message)
+      })
+  })
   toast.success('场景图片批量生成中')
-  watchAsyncResult(() => ids.every(id => {
-    const scene = scenes.value.find(s => s.id === id)
-    const done = !!(scene?.image_url || scene?.imageUrl)
-    if (done) pendingSceneImageIds.value = pendingSceneImageIds.value.filter(item => item !== id)
-    return done
-  }), 36)
 }
 function batchPropImages() {
   const ids = propItems.value.filter(p => !(p.image_url || p.imageUrl)).map(p => p.id)
   if (!ids.length) { toast.info('所有道具图片已生成'); return }
   pendingPropImageIds.value = [...new Set([...pendingPropImageIds.value, ...ids])]
-  ids.forEach(id => { propAPI.generateImage(id, epId.value, imageModel.value || undefined, ownerConfigId(imageModelOptions.value, imageModel.value), chatModelOverride(), chatConfigId()).then(() => refresh()).catch(e => toast.error(e.message)) })
+  ids.forEach(id => {
+    propAPI.generateImage(id, epId.value, imageModel.value || undefined, ownerConfigId(imageModelOptions.value, imageModel.value), chatModelOverride(), chatConfigId())
+      .then(() => refresh())
+      .catch(e => {
+        pendingPropImageIds.value = pendingPropImageIds.value.filter(item => item !== id)
+        toast.error(e.message)
+      })
+  })
   toast.success('道具图片批量生成中')
-  watchAsyncResult(() => ids.every(id => {
-    const prop = propItems.value.find(p => p.id === id)
-    const done = !!(prop?.image_url || prop?.imageUrl)
-    if (done) pendingPropImageIds.value = pendingPropImageIds.value.filter(item => item !== id)
-    return done
-  }), 36)
 }
 function getVideoUrl(s) { return s?.video_url || s?.videoUrl || s?.composed_video_url || s?.composedVideoUrl || null }
 function hasVid(s) { return !!getVideoUrl(s) }
@@ -3378,7 +3455,12 @@ async function loadConfigs() {
   } catch (e) { console.error('Failed to load AI configs', e) }
 }
 
-onMounted(async () => { await refresh(); loadConfigs(); syncExtractStatus() })
+onMounted(async () => {
+  await refresh()
+  clearSettledImagePending()
+  loadConfigs()
+  syncExtractStatus()
+})
 </script>
 
 <style scoped>
@@ -3532,8 +3614,42 @@ onMounted(async () => { await refresh(); loadConfigs(); syncExtractStatus() })
 
 .studio-actions {
   display: flex;
+  align-items: center;
   gap: 6px;
 }
+.studio-account {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding-right: 5px;
+  border-right: 1px solid var(--border);
+}
+.studio-account-name {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.studio-icon-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.studio-icon-btn:hover { background: var(--bg-hover); color: var(--text-0); }
+.studio-icon-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--button-focus); }
 .studio-topbar .btn {
   height: 26px;
   padding: 0 9px;
@@ -6078,6 +6194,8 @@ onMounted(async () => { await refresh(); loadConfigs(); syncExtractStatus() })
   .studio-actions {
     flex-wrap: wrap;
   }
+
+  .studio-account-name { display: none; }
 
   .toolbar-right,
   .step-bubble,

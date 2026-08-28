@@ -14,6 +14,9 @@ dist/
 # Environment
 .env
 .env.local
+# 两套环境文件包含密钥，仅跟踪 .env.example 模板。
+.env.development
+.env.production
 
 # Logs
 *.log

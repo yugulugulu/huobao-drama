@@ -7,11 +7,10 @@
  * 存量文件可用 `npm run backfill-artwork`（backend）补齐。
  */
 
-/** 图片地址 → 缩略图地址；非 /static 图片（远程 URL 等）原样返回 */
+/** 图片地址 → 缩略图地址；同时支持本地 static 路径和 OSS 公开 URL。 */
 export function thumbOf(url: string): string {
-  if (!url || !url.includes('/static/')) return url
-  if (!/\.(png|jpe?g|webp|gif)$/i.test(url)) return url
-  return url.replace(/\.[^./]+$/, '_thumb.webp')
+  if (!url || !/\.(png|jpe?g|webp|gif)(?:\?.*)?$/i.test(url)) return url
+  return url.replace(/\.[^./?]+(?=$|\?)/, '_thumb.webp')
 }
 
 /** 缩略图加载失败（老数据未回填）时回退原图 */
@@ -22,9 +21,8 @@ export function thumbFallback(e: Event, orig: string) {
   el.src = orig
 }
 
-/** 视频地址 → 海报帧地址；无法推导（远程 URL 等）时返回空串，不设置 poster */
+/** 视频地址 → 海报帧地址；同时支持本地 static 路径和 OSS 公开 URL。 */
 export function posterOf(url: string): string {
-  if (!url || !url.includes('/static/')) return ''
-  if (!/\.(mp4|webm|mov)$/i.test(url)) return ''
-  return url.replace(/\.[^./]+$/, '_poster.jpg')
+  if (!url || !/\.(mp4|webm|mov)(?:\?.*)?$/i.test(url)) return ''
+  return url.replace(/\.[^./?]+(?=$|\?)/, '_poster.jpg')
 }
