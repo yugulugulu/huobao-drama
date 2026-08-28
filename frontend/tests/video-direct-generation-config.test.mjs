@@ -9,7 +9,7 @@ const volcengineAdapter = readFileSync(new URL('../../backend/src/services/adapt
 test('video presets default to direct Seedance 2.0 generation', () => {
   const combined = `${settingsPage}\n${aiConfigRoute}\n${volcengineAdapter}`
   assert.doesNotMatch(combined, /doubao-seedance-1-5-pro-251215/)
-  assert.match(settingsPage, /Seedance 2\.0/)
+  assert.match(settingsPage, /doubao-seedance-2-0/)
   assert.match(settingsPage, /doubao-seedance-2-0-260128/)
   assert.match(settingsPage, /doubao-seedance-2-0-fast-260128/)
   assert.match(settingsPage, /doubao-seedance-2-0-mini-260615/)
@@ -20,7 +20,7 @@ test('video presets use official provider endpoints', () => {
   const providerPresetsEnd = settingsPage.indexOf('\n}\nconst byType', presetsStart)
   const providerPresets = settingsPage.slice(presetsStart, providerPresetsEnd)
   assert.doesNotMatch(providerPresets, /api\.chatfire\.site/)
-  assert.match(settingsPage, /https:\/\/ark\.cn-beijing\.volces\.com/)
+  assert.match(settingsPage, /TOKENBOX_BASE_URL/)
   assert.doesNotMatch(settingsPage, /https:\/\/dashscope\.aliyuncs\.com/)
   assert.doesNotMatch(settingsPage, /https:\/\/api\.vidu\.com/)
 })

@@ -147,6 +147,7 @@ export const aiConfigAPI = {
   update: (id: number, d: any) => api.put(`/ai-configs/${id}`, d),
   del: (id: number) => api.del(`/ai-configs/${id}`),
   test: (d: any) => api.post('/ai-configs/test', d),
+  models: (d: any) => api.post<{ models: string[] }>('/ai-configs/models', d),
 }
 
 export const promptAPI = {

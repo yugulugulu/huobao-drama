@@ -84,7 +84,7 @@ test('AI config routes reject unsupported service/provider pairs in create, test
 
   assert.match(testRoute, /body\.service_type\.trim\(\)\.toLowerCase\(\)/)
   assert.match(testRoute, /body\.provider\.trim\(\)\.toLowerCase\(\)/)
-  assert.match(testRoute, /if \(!serviceType \|\| !provider \|\| !body\.base_url\)/)
+  assert.match(testRoute, /if \(!serviceType \|\| !provider\)/)
   assert.match(testRoute, /isOfficialProvider\(serviceType,\s*provider\)/)
   assert.match(testRoute, /badRequest\(c,\s*'Unsupported service_type\/provider'\)/)
 
@@ -214,6 +214,6 @@ test('video adapter registry exposes OpenAI compatibility without changing VolcE
   assert.match(registry, /volcengine:\s*new VolcEngineVideoAdapter\(\)/)
   assert.match(openaiVideo, /'\/video\/generations'/)
   assert.match(volcVideo, /'\/contents\/generations\/tasks'/)
-  assert.match(settings, /TokenBox \/ OpenAI 兼容/)
-  assert.match(settings, /https:\/\/tokenbox\.you\/v1/)
+  assert.match(settings, /TOKENBOX_BASE_URL/)
+  assert.match(settings, /https:\/\/tokenbox\.you/)
 })

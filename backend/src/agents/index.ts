@@ -155,7 +155,7 @@ let lastLoggedTextEndpointKey = ''
 const thinkingOffEnabled = (process.env.AI_DISABLE_THINKING ?? 'true').toLowerCase() !== 'false'
 
 function isOfficialTextHost(baseURL: string) {
-  return /api\.openai\.com|api\.deepseek\.com|generativelanguage\.googleapis\.com/.test(baseURL)
+  return /api\.openai\.com|api\.deepseek\.com|generativelanguage\.googleapis\.com|tokenbox\.you/.test(baseURL)
 }
 
 function openaiThinkingOffPatch(): Record<string, any> {
