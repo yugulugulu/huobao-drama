@@ -21,6 +21,10 @@ export interface VideoPromptBatchStatus {
 
 const tasks = new Map<number, VideoPromptBatchStatus>()
 
+function isUsableVideoPrompt(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.trim().toLowerCase() !== 'null'
+}
+
 /** 启动批量生成（立即返回）；运行中返回 started:false,total:-1；无待生成分镜返回 started:false,total:0；
  *  传入 storyboardIds 时只处理所选分镜（即使已有提示词也重新生成），否则处理全部缺失提示词的分镜 */
 export async function startVideoPromptBatch(
@@ -78,7 +82,7 @@ export async function startVideoPromptBatch(
         }], { maxSteps: 8, requestContext })
         // 以实际落库为准判定成败
         const [fresh] = await db.select().from(schema.storyboards).where(and(eq(schema.storyboards.id, sb.id), eq(schema.storyboards.userId, opts.userId)))
-        if ((fresh?.videoPrompt || '').trim()) task.completed++
+        if (isUsableVideoPrompt(fresh?.videoPrompt)) task.completed++
         else {
           task.failed++
           logTaskError('VideoPrompt', 'batch-shot', { storyboardId: sb.id, error: 'agent finished but video_prompt is empty' })

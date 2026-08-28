@@ -515,7 +515,7 @@
                       <span v-if="hasVid(sb)" class="shot-chip-video" title="已生成视频"><Play :size="8" />已出片</span>
                     </div>
                     <div class="shot-body">
-                      <div class="shot-desc" :class="{ 'is-empty': !sb.description }">{{ sb.description || '暂无画面描述' }}</div>
+                      <div class="shot-desc" :class="{ 'is-empty': !displayText(sb.description) }">{{ displayText(sb.description) || '暂无画面描述' }}</div>
                     </div>
                     <div class="shot-meta">
                       <div class="shot-avatars">
@@ -593,11 +593,11 @@
                       </div>
                       <label class="field">
                         <span class="field-label">画面描述 <span class="dim">(按【镜头1】【镜头2】…逐子镜头描述；台词写「角色名说：「台词」」，旁白写「旁白：内容」)</span></span>
-                        <textarea :value="selectedSb.description || ''" class="textarea" rows="8" @blur="updateField(selectedSb, 'description', $event.target.value)" placeholder="分镜画面描述" />
+                        <textarea :value="displayText(selectedSb.description)" class="textarea" rows="8" @blur="updateField(selectedSb, 'description', $event.target.value)" placeholder="分镜画面描述" />
                       </label>
                       <label class="field">
                         <span class="field-label">氛围</span>
-                        <textarea :value="selectedSb.atmosphere || ''" class="textarea" rows="3" @blur="updateField(selectedSb, 'atmosphere', $event.target.value)" placeholder="光线、色调、空气感、环境氛围" />
+                        <textarea :value="displayText(selectedSb.atmosphere)" class="textarea" rows="3" @blur="updateField(selectedSb, 'atmosphere', $event.target.value)" placeholder="光线、色调、空气感、环境氛围" />
                       </label>
                     </div>
 
@@ -2538,6 +2538,14 @@ const currentSubStageLabel = computed(() => currentStageLabel.value)
 
 const totalDuration = computed(() => sbs.value.reduce((s, sb) => s + (sb.duration || 10), 0))
 const selectedSb = ref(null)
+
+function displayText(value) {
+  return typeof value === 'string' && value.trim().toLowerCase() !== 'null' ? value : ''
+}
+
+function isUsableText(value) {
+  return !!displayText(value).trim()
+}
 const selectedVideoTaskNumber = computed(() => {
   const index = videoTaskRows.value.findIndex(task => String(task.id) === String(selectedSb.value?.id))
   return index >= 0 ? index + 1 : 0
@@ -2760,7 +2768,7 @@ function onShotCardClick(sb) {
 }
 // 仅缺失：选中还没有视频提示词的分镜
 function selectMissingSbs() {
-  selectedSbIds.value = sbs.value.filter(sb => !((sb.video_prompt || sb.videoPrompt || '').trim())).map(sb => sb.id)
+  selectedSbIds.value = sbs.value.filter(sb => !isUsableText(sb.video_prompt || sb.videoPrompt)).map(sb => sb.id)
 }
 function exitSbSelectMode() {
   sbSelectMode.value = false
