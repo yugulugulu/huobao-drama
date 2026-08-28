@@ -462,7 +462,7 @@
               <span class="tag mono">{{ sbs.length }} 段落 · {{ totalDuration }}s</span>
               <span class="tag">{{ lockedVideoConfigLabel }}</span>
               <div class="ml-auto flex gap-1">
-                <button class="btn btn-sm" :disabled="rn" @click="doBreakdown">
+                <button class="btn btn-sm" :disabled="rn || storyboardBreakdown.running" @click="doBreakdown">
                   <Loader2 v-if="rt === 'storyboard_breaker'" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                   {{ sbs.length ? '重新拆分' : '开始拆分' }}
@@ -475,7 +475,26 @@
               </div>
             </div>
 
-            <div v-if="sbs.length" class="storyboard-workbench">
+            <div v-if="storyboardBreakdown.running" class="storyboard-breakdown-progress">
+              <div class="storyboard-breakdown-spinner"><Loader2 :size="22" class="animate-spin" /></div>
+              <div class="storyboard-breakdown-title">{{ storyboardBreakdown.stage }}</div>
+              <div class="storyboard-breakdown-meta">已用时 {{ storyboardElapsedText }}</div>
+              <div class="storyboard-breakdown-track"><span /></div>
+              <div class="storyboard-breakdown-hint">
+                {{ storyboardBreakdown.elapsed >= 30 ? '仍在处理中，请勿重复提交' : '正在处理，请稍候' }}
+              </div>
+            </div>
+
+            <div v-else-if="storyboardBreakdown.status === 'failed'" class="storyboard-breakdown-failed">
+              <div class="storyboard-breakdown-failed-title">分镜拆分失败</div>
+              <div class="storyboard-breakdown-failed-stage">失败阶段：{{ storyboardBreakdown.stage }}</div>
+              <div class="storyboard-breakdown-error">{{ storyboardBreakdown.error || '未返回具体错误信息' }}</div>
+              <button class="btn btn-primary" :disabled="storyboardBreakdown.running" @click="doBreakdown">
+                <RotateCcw :size="13" /> 重试
+              </button>
+            </div>
+
+            <div v-else-if="sbs.length" class="storyboard-workbench">
               <aside class="storyboard-shot-list">
                 <div class="shot-list-head">
                   <div class="shot-list-head-main">
@@ -676,18 +695,13 @@
               </aside>
             </div>
 
-            <div v-else-if="rn && rt === 'storyboard_breaker'" class="step-loading">
-              <Loader2 :size="24" class="animate-spin" style="color:var(--accent)" />
-              <div class="loading-text">正在拆分分镜...</div>
-            </div>
-
             <div v-else class="step-empty video-task-empty-state">
               <div class="empty-visual">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="2" y="2" width="20" height="20" rx="2.5"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="10" y1="8" x2="10" y2="16"/><line x1="13" y1="8" x2="13" y2="16"/></svg>
               </div>
               <div class="empty-title">开始拆分分镜</div>
               <div class="empty-desc">根据剧本、角色和场景拆分镜头，生成分镜描述和绑定信息。</div>
-              <button class="btn btn-primary" :disabled="rn" @click="doBreakdown">
+              <button class="btn btn-primary" :disabled="rn || storyboardBreakdown.running" @click="doBreakdown">
                 <Loader2 v-if="rt === 'storyboard_breaker'" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 开始拆分
@@ -719,7 +733,7 @@
               <div class="empty-title">先生成分镜</div>
               <div class="empty-desc">视频任务来自分镜拆分结果。先生成分镜描述和视频提示词，再批量生成视频。</div>
               <div class="locked-config-banner">当前集视频模型：{{ lockedVideoConfigLabel }}</div>
-              <button class="btn btn-primary" :disabled="rn" @click="prodTab = 'storyboard'; doBreakdown()">
+              <button class="btn btn-primary" :disabled="rn || storyboardBreakdown.running" @click="prodTab = 'storyboard'; doBreakdown()">
                 <Loader2 v-if="rt === 'storyboard_breaker'" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 AI 生成分镜
@@ -1552,7 +1566,7 @@
 <script setup>
 import { toast } from 'vue-sonner'
 import {
-  Users, Video, FileText, FolderKanban, Clapperboard, Download, Loader2,
+  Users, Video, FileText, FolderKanban, Clapperboard, Download, Loader2, RotateCcw,
   MapPin, Play, Plus, X, ListTodo, LogOut, Settings,
 } from 'lucide-vue-next'
 import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, aiConfigAPI, uploadAPI } from '~/composables/useApi'
@@ -1575,6 +1589,13 @@ const storedPanel = (() => {
 let panelRestored = !!storedPanel
 const panel = ref(['production', 'export'].includes(storedPanel?.panel) ? storedPanel.panel : 'script')
 const { running: rn, runningType: rt, run: runAgent } = useAgent()
+const storyboardBreakdown = ref({ status: null, stage: '读取剧本', started_at: '', updated_at: '', finished_at: '', error: '', result_count: 0, elapsed: 0, running: false })
+let storyboardBreakdownTimer = null
+let storyboardBreakdownPollTimer = null
+const storyboardElapsedText = computed(() => {
+  const seconds = Math.max(0, Math.floor(storyboardBreakdown.value.elapsed || 0))
+  return `${Math.floor(seconds / 60) ? `${Math.floor(seconds / 60)}分` : ''}${String(seconds % 60).padStart(2, '0')}秒`
+})
 
 const localRaw = ref(''), localScript = ref('')
 const rawContent = computed(() => episode.value?.content || '')
@@ -1981,6 +2002,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleImageViewerKeydown)
   stopGenTasksPolling()
+  stopStoryboardBreakdownPolling()
 })
 
 function isPendingSceneImage(id) {
@@ -2826,6 +2848,7 @@ function pollVideoPromptBatch(attempts = 240) {
   setTimeout(() => tick(attempts), 2500)
 }
 function doBreakdown() {
+  if (storyboardBreakdown.value.running || !epId.value) return
   const charList = chars.value.length
     ? chars.value.map(c => `${c.name}(ID:${c.id})`).join('、')
     : '（当前集还没有角色）'
@@ -2835,7 +2858,7 @@ function doBreakdown() {
   const propList = propItems.value.length
     ? propItems.value.map(p => `${p.name}(ID:${p.id})`).join('、')
     : '（当前集还没有道具）'
-  runAgent('storyboard_breaker', `请基于当前集剧本拆分分镜（不需要生成视频提示词，video_prompt 在视频生成阶段按需生成）。
+  const message = `请基于当前集剧本拆分分镜（不需要生成视频提示词，video_prompt 在视频生成阶段按需生成）。
 
 当前集已有角色：${charList}
 当前集已有场景：${sceneList}
@@ -2845,7 +2868,77 @@ function doBreakdown() {
 - 每个镜头必须根据剧本内容，从上述当前集已有角色中选出出场的角色绑定 character_ids（ID 必须来自上述列表；有角色出场就必须绑定，不要遗漏）
 - 每个镜头尽量匹配上述已有场景填写 scene_id（ID 必须来自上述列表），不要凭空创造新场景
 - 每个镜头出现关键道具（被使用、交接、特写或在画面中明显可见）时，从上述当前集已有道具中绑定 prop_ids（ID 必须来自上述列表）；没有道具出现可传空数组
-- 只有纯环境空镜头才可以不绑定角色`, dramaId, epId.value, refresh, chatModelOverride(), chatConfigId())
+- 只有纯环境空镜头才可以不绑定角色`
+  const startedAt = new Date().toISOString()
+  storyboardBreakdown.value = { status: 'queued', stage: '读取剧本', started_at: startedAt, updated_at: startedAt, finished_at: '', error: '', result_count: 0, elapsed: 0, running: true }
+  startStoryboardBreakdownClock()
+  episodeAPI.breakStoryboard(epId.value, message, chatModelOverride(), chatConfigId())
+    .then(() => pollStoryboardBreakdown())
+    .catch((error) => {
+      stopStoryboardBreakdownPolling()
+      storyboardBreakdown.value = { ...storyboardBreakdown.value, status: 'failed', running: false, error: error?.message || '分镜拆分启动失败' }
+      toast.error(error?.message || '分镜拆分启动失败')
+    })
+}
+
+function startStoryboardBreakdownClock() {
+  if (storyboardBreakdownTimer) clearInterval(storyboardBreakdownTimer)
+  storyboardBreakdownTimer = setInterval(() => {
+    if (storyboardBreakdown.value.started_at) storyboardBreakdown.value.elapsed = Math.max(0, (Date.now() - new Date(storyboardBreakdown.value.started_at).getTime()) / 1000)
+  }, 1000)
+}
+
+function stopStoryboardBreakdownPolling() {
+  if (storyboardBreakdownTimer) clearInterval(storyboardBreakdownTimer)
+  if (storyboardBreakdownPollTimer) clearTimeout(storyboardBreakdownPollTimer)
+  storyboardBreakdownTimer = null
+  storyboardBreakdownPollTimer = null
+}
+
+async function pollStoryboardBreakdown(attempts = 180) {
+  const tick = async (left) => {
+    try {
+      const task = await episodeAPI.breakStoryboardStatus(epId.value)
+      if (task) {
+        const startedAt = task.started_at || storyboardBreakdown.value.started_at
+        storyboardBreakdown.value = { ...storyboardBreakdown.value, ...task, elapsed: startedAt ? Math.max(0, (Date.now() - new Date(startedAt).getTime()) / 1000) : 0, running: task.status === 'queued' || task.status === 'running' }
+        if (task.status === 'completed') {
+          stopStoryboardBreakdownPolling()
+          await refresh()
+          toast.success(`分镜拆分完成，共 ${task.result_count || 0} 段`)
+          return
+        }
+        if (task.status === 'failed') {
+          stopStoryboardBreakdownPolling()
+          toast.error(task.error || '分镜拆分失败')
+          return
+        }
+      }
+    } catch {
+      if (left <= 0) {
+        stopStoryboardBreakdownPolling()
+        storyboardBreakdown.value = { ...storyboardBreakdown.value, status: 'failed', running: false, error: '无法获取分镜拆分状态，请刷新页面重试' }
+        toast.error('无法获取分镜拆分状态，请刷新页面重试')
+        return
+      }
+    }
+    if (left > 0) storyboardBreakdownPollTimer = setTimeout(() => tick(left - 1), 1800)
+  }
+  await tick(attempts)
+}
+
+async function syncStoryboardBreakdownStatus() {
+  if (!epId.value) return
+  try {
+    const task = await episodeAPI.breakStoryboardStatus(epId.value)
+    if (!task) return
+    const startedAt = task.started_at || new Date().toISOString()
+    storyboardBreakdown.value = { ...storyboardBreakdown.value, ...task, elapsed: Math.max(0, (Date.now() - new Date(startedAt).getTime()) / 1000), running: task.status === 'queued' || task.status === 'running' }
+    if (storyboardBreakdown.value.running) {
+      startStoryboardBreakdownClock()
+      pollStoryboardBreakdown()
+    }
+  } catch {}
 }
 
 // 按需为单个分镜生成视频提示词：由 prompt_generator 读取分镜字段生成并保存到 video_prompt
@@ -3468,6 +3561,7 @@ onMounted(async () => {
   clearSettledImagePending()
   loadConfigs()
   syncExtractStatus()
+  syncStoryboardBreakdownStatus()
 })
 </script>
 
@@ -3983,6 +4077,23 @@ onMounted(async () => {
   flex: 1; gap: 12px;
 }
 .loading-text { font-size: 13px; color: var(--text-2); }
+
+.storyboard-breakdown-progress,
+.storyboard-breakdown-failed {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  flex: 1; min-height: 300px; gap: 10px; padding: 32px;
+  animation: fadeIn 0.25s var(--ease-out);
+}
+.storyboard-breakdown-spinner { color: var(--accent); display: flex; }
+.storyboard-breakdown-title { font-size: 18px; font-weight: 750; color: var(--text-0); }
+.storyboard-breakdown-meta,
+.storyboard-breakdown-hint,
+.storyboard-breakdown-failed-stage { font-size: 12px; color: var(--text-2); }
+.storyboard-breakdown-track { width: min(360px, 80%); height: 4px; overflow: hidden; background: var(--bg-2); border-radius: 2px; }
+.storyboard-breakdown-track span { display: block; width: 42%; height: 100%; background: var(--accent); border-radius: inherit; animation: storyboard-progress 1.5s ease-in-out infinite; }
+.storyboard-breakdown-failed-title { font-size: 18px; font-weight: 750; color: var(--error); }
+.storyboard-breakdown-error { max-width: 560px; padding: 10px 12px; border: 1px solid var(--border); background: var(--error-bg); color: var(--text-1); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+@keyframes storyboard-progress { from { transform: translateX(-130%); } to { transform: translateX(250%); } }
 
 /* Step Navigator Bubble */
 .step-bubble {

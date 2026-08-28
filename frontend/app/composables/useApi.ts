@@ -62,6 +62,8 @@ export const episodeAPI = {
   extractStatus: (id: number) => api.get(`/episodes/${id}/extract-status`),
   generateVideoPrompts: (id: number, model?: string, configId?: number, storyboardIds?: number[]) => api.post(`/episodes/${id}/generate-video-prompts`, { model: model || undefined, config_id: configId || undefined, storyboard_ids: storyboardIds?.length ? storyboardIds : undefined }),
   videoPromptsStatus: (id: number) => api.get(`/episodes/${id}/video-prompts-status`),
+  breakStoryboard: (id: number, message: string, model?: string, configId?: number) => api.post(`/episodes/${id}/break-storyboard`, { message, model: model || undefined, config_id: configId || undefined }),
+  breakStoryboardStatus: (id: number) => api.get(`/episodes/${id}/break-storyboard-status`),
 }
 
 export const storyboardAPI = {

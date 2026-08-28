@@ -11,8 +11,8 @@ import { now } from '../../utils/response.js'
 import { logTaskProgress, logTaskSuccess } from '../../utils/task-logger.js'
 import { getDramaId, getEpisodeId, getUserId } from '../context.js'
 
-async function syncStoryboardCharacters(storyboardId: number, characterIds: number[]) {
-  await db.delete(schema.storyboardCharacters)
+async function syncStoryboardCharacters(conn: any, storyboardId: number, characterIds: number[]) {
+  await conn.delete(schema.storyboardCharacters)
     .where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
 
 
@@ -20,78 +20,78 @@ async function syncStoryboardCharacters(storyboardId: number, characterIds: numb
   if (!uniqueIds.length) return
 
   for (const characterId of uniqueIds) {
-    await db.insert(schema.storyboardCharacters).values({
+    await conn.insert(schema.storyboardCharacters).values({
       storyboardId,
       characterId,
     })
   }
 }
 
-async function syncStoryboardProps(storyboardId: number, propIds: number[]) {
-  await db.delete(schema.storyboardProps)
+async function syncStoryboardProps(conn: any, storyboardId: number, propIds: number[]) {
+  await conn.delete(schema.storyboardProps)
     .where(eq(schema.storyboardProps.storyboardId, storyboardId))
 
   const uniqueIds = [...new Set(propIds.filter(Boolean))]
   if (!uniqueIds.length) return
 
   for (const propId of uniqueIds) {
-    await db.insert(schema.storyboardProps).values({
+    await conn.insert(schema.storyboardProps).values({
       storyboardId,
       propId,
     })
   }
 }
 
-async function getEpisodeSceneIds(episodeId: number) {
-  const links = await db.select().from(schema.episodeScenes)
+async function getEpisodeSceneIds(conn: any, episodeId: number) {
+  const links = await conn.select().from(schema.episodeScenes)
     .where(eq(schema.episodeScenes.episodeId, episodeId))
-  return new Set(links.map(link => link.sceneId))
+  return new Set(links.map((link: any) => link.sceneId))
 }
 
-async function getEpisodeCharacterIds(episodeId: number) {
-  const links = await db.select().from(schema.episodeCharacters)
+async function getEpisodeCharacterIds(conn: any, episodeId: number) {
+  const links = await conn.select().from(schema.episodeCharacters)
     .where(eq(schema.episodeCharacters.episodeId, episodeId))
-  return new Set(links.map(link => link.characterId))
+  return new Set(links.map((link: any) => link.characterId))
 }
 
-async function getEpisodePropIds(episodeId: number) {
-  const links = await db.select().from(schema.episodeProps)
+async function getEpisodePropIds(conn: any, episodeId: number) {
+  const links = await conn.select().from(schema.episodeProps)
     .where(eq(schema.episodeProps.episodeId, episodeId))
-  return new Set(links.map(link => link.propId))
+  return new Set(links.map((link: any) => link.propId))
 }
 
-async function validateStoryboardBindings(userId: number, episodeId: number, dramaId: number, sceneId: number | null | undefined, characterIds: number[] | undefined, propIds?: number[] | undefined) {
-  const episodeSceneIds = await getEpisodeSceneIds(episodeId)
-  const episodeCharacterIds = await getEpisodeCharacterIds(episodeId)
-  const episodePropIds = await getEpisodePropIds(episodeId)
+async function validateStoryboardBindings(conn: any, userId: number, episodeId: number, dramaId: number, sceneId: number | null | undefined, characterIds: number[] | undefined, propIds?: number[] | undefined) {
+  const episodeSceneIds = await getEpisodeSceneIds(conn, episodeId)
+  const episodeCharacterIds = await getEpisodeCharacterIds(conn, episodeId)
+  const episodePropIds = await getEpisodePropIds(conn, episodeId)
 
   // 场景/角色/道具属于本剧但尚未关联到当前集时，自动补关联（拆分时即完成绑定）
   if (sceneId != null && !episodeSceneIds.has(sceneId)) {
-    const [scene] = await db.select().from(schema.scenes).where(and(eq(schema.scenes.id, sceneId), eq(schema.scenes.userId, userId)))
+    const [scene] = await conn.select().from(schema.scenes).where(and(eq(schema.scenes.id, sceneId), eq(schema.scenes.userId, userId)))
     if (!scene || scene.dramaId !== dramaId || scene.deletedAt) {
       throw new Error(`scene_id ${sceneId} 不属于当前项目`)
     }
-    await db.insert(schema.episodeScenes).values({ episodeId, sceneId, createdAt: now() })
+    await conn.insert(schema.episodeScenes).values({ episodeId, sceneId, createdAt: now() })
   }
 
   const uniqueCharacterIds = [...new Set((characterIds || []).filter(Boolean))]
   for (const characterId of uniqueCharacterIds) {
     if (episodeCharacterIds.has(characterId)) continue
-    const [character] = await db.select().from(schema.characters).where(and(eq(schema.characters.id, characterId), eq(schema.characters.userId, userId)))
+    const [character] = await conn.select().from(schema.characters).where(and(eq(schema.characters.id, characterId), eq(schema.characters.userId, userId)))
     if (!character || character.dramaId !== dramaId || character.deletedAt) {
       throw new Error(`character_id ${characterId} 不属于当前项目`)
     }
-    await db.insert(schema.episodeCharacters).values({ episodeId, characterId, createdAt: now() })
+    await conn.insert(schema.episodeCharacters).values({ episodeId, characterId, createdAt: now() })
   }
 
   const uniquePropIds = [...new Set((propIds || []).filter(Boolean))]
   for (const propId of uniquePropIds) {
     if (episodePropIds.has(propId)) continue
-    const [prop] = await db.select().from(schema.props).where(and(eq(schema.props.id, propId), eq(schema.props.userId, userId)))
+    const [prop] = await conn.select().from(schema.props).where(and(eq(schema.props.id, propId), eq(schema.props.userId, userId)))
     if (!prop || prop.dramaId !== dramaId || prop.deletedAt) {
       throw new Error(`prop_id ${propId} 不属于当前项目`)
     }
-    await db.insert(schema.episodeProps).values({ episodeId, propId, createdAt: now() })
+    await conn.insert(schema.episodeProps).values({ episodeId, propId, createdAt: now() })
   }
 }
 
@@ -258,6 +258,7 @@ const saveStoryboards = createTool({
     const ids = requireIds(context)
     if ('error' in ids) return ids
     const { userId, episodeId, dramaId } = ids
+    if (!storyboards.length) return { error: '模型未生成有效分镜，保存操作已取消' }
     const ts = now()
     logTaskProgress('StoryboardTool', 'save-begin', {
       episodeId,
@@ -265,21 +266,20 @@ const saveStoryboards = createTool({
       count: storyboards.length,
       shotNumbers: storyboards.map(sb => sb.shot_number).join(','),
     })
-    const existingStoryboardRows = await db.select().from(schema.storyboards)
-      .where(and(eq(schema.storyboards.userId, userId), eq(schema.storyboards.episodeId, episodeId)))
-    const existingStoryboardIds = existingStoryboardRows.map(sb => sb.id)
-    for (const storyboardId of existingStoryboardIds) {
-      await db.delete(schema.storyboardCharacters)
-        .where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
-      await db.delete(schema.storyboardProps)
-        .where(eq(schema.storyboardProps.storyboardId, storyboardId))
-    }
-    await db.delete(schema.storyboards).where(and(eq(schema.storyboards.userId, userId), eq(schema.storyboards.episodeId, episodeId)))
+    const saved = await db.transaction(async (tx) => {
+      const existingStoryboardRows = await tx.select().from(schema.storyboards)
+        .where(and(eq(schema.storyboards.userId, userId), eq(schema.storyboards.episodeId, episodeId)))
+      const existingStoryboardIds = existingStoryboardRows.map(sb => sb.id)
+      for (const storyboardId of existingStoryboardIds) {
+        await tx.delete(schema.storyboardCharacters).where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
+        await tx.delete(schema.storyboardProps).where(eq(schema.storyboardProps.storyboardId, storyboardId))
+      }
+      await tx.delete(schema.storyboards).where(and(eq(schema.storyboards.userId, userId), eq(schema.storyboards.episodeId, episodeId)))
 
-    let totalDuration = 0
-    for (const sb of storyboards) {
-      await validateStoryboardBindings(userId, episodeId, dramaId, sb.scene_id, sb.character_ids, sb.prop_ids)
-      const res = await db.insert(schema.storyboards).values({
+      let totalDuration = 0
+      for (const sb of storyboards) {
+        await validateStoryboardBindings(tx, userId, episodeId, dramaId, sb.scene_id, sb.character_ids, sb.prop_ids)
+        const res = await tx.insert(schema.storyboards).values({
         userId,
         episodeId,
         storyboardNumber: sb.shot_number,
@@ -293,21 +293,23 @@ const saveStoryboards = createTool({
         sceneId: sb.scene_id, duration: sb.duration || 10,
         createdAt: ts, updatedAt: ts,
       })
-      await syncStoryboardCharacters(getInsertId(res), sb.character_ids || [])
-      await syncStoryboardProps(getInsertId(res), sb.prop_ids || [])
-      totalDuration += sb.duration || 10
-    }
+        await syncStoryboardCharacters(tx, getInsertId(res), sb.character_ids || [])
+        await syncStoryboardProps(tx, getInsertId(res), sb.prop_ids || [])
+        totalDuration += sb.duration || 10
+      }
 
-    await db.update(schema.episodes)
-      .set({ duration: Math.ceil(totalDuration / 60), updatedAt: ts })
-      .where(and(eq(schema.episodes.id, episodeId), eq(schema.episodes.userId, userId)))
+      await tx.update(schema.episodes)
+        .set({ duration: Math.ceil(totalDuration / 60), updatedAt: ts })
+        .where(and(eq(schema.episodes.id, episodeId), eq(schema.episodes.userId, userId)))
+      return { totalDuration }
+    })
 
     logTaskSuccess('StoryboardTool', 'save-complete', {
       episodeId,
       count: storyboards.length,
-      totalDuration,
+      totalDuration: saved.totalDuration,
     })
-    return { message: `Saved ${storyboards.length} storyboards`, count: storyboards.length, total_duration: totalDuration }
+    return { message: `Saved ${storyboards.length} storyboards`, count: storyboards.length, total_duration: saved.totalDuration }
   },
 })
 
@@ -360,6 +362,7 @@ const updateStoryboard = createTool({
           .map(link => link.propId)
 
     await validateStoryboardBindings(
+      db,
       userId,
       episodeId,
       dramaId,
@@ -387,8 +390,8 @@ const updateStoryboard = createTool({
     if ('duration' in fields) updates.duration = fields.duration
     await db.update(schema.storyboards).set(updates)
       .where(and(eq(schema.storyboards.id, storyboard_id), eq(schema.storyboards.userId, userId), eq(schema.storyboards.episodeId, episodeId)))
-    if ('character_ids' in fields) await syncStoryboardCharacters(storyboard_id, fields.character_ids || [])
-    if ('prop_ids' in fields) await syncStoryboardProps(storyboard_id, fields.prop_ids || [])
+    if ('character_ids' in fields) await syncStoryboardCharacters(db, storyboard_id, fields.character_ids || [])
+    if ('prop_ids' in fields) await syncStoryboardProps(db, storyboard_id, fields.prop_ids || [])
     logTaskSuccess('StoryboardTool', 'update-complete', {
       episodeId,
       storyboardId: storyboard_id,
