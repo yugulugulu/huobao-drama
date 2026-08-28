@@ -4,7 +4,7 @@ import { db, getInsertId, schema } from '../db/index.js'
 import { success, notFound, created, badRequest, now } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { joinProviderUrl } from '../services/adapters/url.js'
-import { isOfficialProvider } from '../services/ai.js'
+import { isOfficialProvider, TOKENBOX_BASE_URL } from '../services/ai.js'
 import { redactUrl, logTaskError, logTaskProgress, logTaskSuccess } from '../utils/task-logger.js'
 import { currentUser } from '../middleware/auth.js'
 
@@ -95,6 +95,7 @@ app.get('/', async (c) => {
 
   const parsed = rows.map(r => ({
     ...toSnakeCase(r),
+    base_url: TOKENBOX_BASE_URL,
     model: r.model ? JSON.parse(r.model) : [],
   }))
   return success(c, parsed)
@@ -121,7 +122,7 @@ app.post('/', async (c) => {
     serviceType,
     provider,
     name: body.name || `${provider}-${serviceType}`,
-    baseUrl: body.base_url || '',
+    baseUrl: TOKENBOX_BASE_URL,
     apiKey: body.api_key || '',
     model: JSON.stringify(body.model || []),
     priority: body.priority || 0,
@@ -144,15 +145,15 @@ app.post('/test', async (c) => {
   const body = await c.req.json()
   const serviceType = typeof body.service_type === 'string' ? body.service_type.trim().toLowerCase() : body.service_type
   const provider = typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : body.provider
-  if (!serviceType || !provider || !body.base_url) {
-    return badRequest(c, 'service_type, provider and base_url are required')
+  if (!serviceType || !provider) {
+    return badRequest(c, 'service_type and provider are required')
   }
   if (!isOfficialProvider(serviceType, provider)) {
     return badRequest(c, 'Unsupported service_type/provider')
   }
 
   const model = Array.isArray(body.model) ? body.model[0] : body.model
-  const probe = buildProbe(serviceType, provider, body.base_url, model, body.api_key)
+  const probe = buildProbe(serviceType, provider, TOKENBOX_BASE_URL, model, body.api_key)
   const probeUrl = redactUrl(probe.url)
 
   logTaskProgress('AIConfig', 'probe-start', {
@@ -213,6 +214,35 @@ app.post('/test', async (c) => {
   }
 })
 
+// POST /ai-configs/models: query the upstream OpenAI-compatible model catalog.
+app.post('/models', async (c) => {
+  const body = await c.req.json()
+  const serviceType = typeof body.service_type === 'string' ? body.service_type.trim().toLowerCase() : body.service_type
+  const provider = typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : body.provider
+  if (!serviceType || !provider || !isOfficialProvider(serviceType, provider)) {
+    return badRequest(c, 'Unsupported service_type/provider')
+  }
+  if (!body.api_key) return badRequest(c, 'api_key is required')
+
+  try {
+    const resp = await fetch(joinProviderUrl(TOKENBOX_BASE_URL, '/v1', '/models'), {
+      headers: bearerHeaders(body.api_key),
+    })
+    const payload: any = await resp.json().catch(() => null)
+    if (!resp.ok) return badRequest(c, payload?.error?.message || payload?.message || `上游请求失败 (${resp.status})`)
+
+    const entries = Array.isArray(payload) ? payload : payload?.data || payload?.models || []
+    const models = entries
+      .map((item: any) => typeof item === 'string' ? item : item?.id || item?.name)
+      .filter((model: any): model is string => typeof model === 'string' && model.trim().length > 0)
+      .map((model: string) => model.trim())
+      .filter((model: string, index: number, all: string[]) => all.indexOf(model) === index)
+    return success(c, { models })
+  } catch (error: any) {
+    return badRequest(c, error.message || '获取模型失败')
+  }
+})
+
 // GET /ai-configs/:id
 app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
@@ -221,6 +251,7 @@ app.get('/:id', async (c) => {
   if (!row) return notFound(c)
   return success(c, {
     ...toSnakeCase(row),
+    base_url: TOKENBOX_BASE_URL,
     model: row.model ? JSON.parse(row.model) : [],
   })
 })
@@ -246,7 +277,7 @@ app.put('/:id', async (c) => {
   if ('service_type' in body) updates.serviceType = serviceType
   if ('provider' in body) updates.provider = provider
   if ('name' in body) updates.name = body.name
-  if ('base_url' in body) updates.baseUrl = body.base_url
+  updates.baseUrl = TOKENBOX_BASE_URL
   if ('api_key' in body) updates.apiKey = body.api_key
   if ('model' in body) updates.model = JSON.stringify(body.model)
   if ('priority' in body) updates.priority = body.priority

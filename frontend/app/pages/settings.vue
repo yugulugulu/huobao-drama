@@ -278,7 +278,20 @@
             <span class="field-hint">数值越高越优先。工作台默认会优先使用同类型里优先级最高的启用配置。</span>
           </label>
           <label class="field"><span class="field-label">API Key</span><input v-model="cfgForm.api_key" class="input" type="password" placeholder="sk-..." /></label>
-          <label class="field"><span class="field-label">Base URL</span><input v-model="cfgForm.base_url" class="input" placeholder="https://..." /></label>
+          <label class="field"><span class="field-label">Base URL</span><input v-model="cfgForm.base_url" class="input" readonly /></label>
+          <div class="model-fetch-row">
+            <button type="button" class="btn btn-ghost" :disabled="modelsLoading || !cfgForm.api_key" @click="fetchModels">
+              <Loader2 v-if="modelsLoading" :size="13" class="animate-spin" />
+              <span v-else>获取模型</span>
+            </button>
+            <span class="field-hint">从上游获取模型，可多选；保存时以逗号分隔。</span>
+          </div>
+          <div v-if="modelOptions.length" class="model-picker">
+            <label v-for="model in modelOptions" :key="model" class="model-option">
+              <input type="checkbox" :checked="selectedModels.includes(model)" @change="toggleModel(model)" />
+              <span>{{ model }}</span>
+            </label>
+          </div>
           <label class="field"><span class="field-label">模型（逗号分隔）</span><input v-model="cfgForm.modelStr" class="input" placeholder="model-name" /></label>
           <div v-if="cfgTestResult" class="test-result" :class="{ ok: cfgTestResult.reachable, bad: !cfgTestResult.reachable }">
             <div class="test-result-head">
@@ -410,7 +423,10 @@ const cfgDialog = ref(false)
 const cfgEditId = ref(null)
 const cfgTesting = ref(false)
 const cfgTestResult = ref(null)
+const modelsLoading = ref(false)
+const modelOptions = ref([])
 const cfgForm = reactive({ name: '', provider: '', api_key: '', base_url: '', modelStr: '', service_type: 'text', priority: 0 })
+const TOKENBOX_BASE_URL = 'https://tokenbox.you'
 const serviceTypes = [{ type: 'text', label: '文本' }, { type: 'image', label: '图片' }, { type: 'video', label: '视频' }]
 const providers = ['gemini', 'openai', 'deepseek', 'volcengine']
 const providersByType = {
@@ -426,17 +442,17 @@ const serviceMeta = {
 }
 const providerPresets = {
   text: {
-    gemini: { label: 'Gemini 官方', baseUrl: 'https://generativelanguage.googleapis.com', models: ['gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3-flash-preview'] },
-    openai: { label: 'OpenAI 官方', baseUrl: 'https://api.openai.com', models: ['gpt-5.6-terra'] },
-    deepseek: { label: 'DeepSeek 官方', baseUrl: 'https://api.deepseek.com', models: ['deepseek-chat', 'deepseek-reasoner'] },
+    gemini: { label: 'Gemini', baseUrl: TOKENBOX_BASE_URL, models: ['gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3-flash-preview'] },
+    openai: { label: 'OpenAI', baseUrl: TOKENBOX_BASE_URL, models: ['gpt-5.6-sol'] },
+    deepseek: { label: 'DeepSeek', baseUrl: TOKENBOX_BASE_URL, models: ['deepseek-chat', 'deepseek-reasoner'] },
   },
   image: {
-    gemini: { label: 'Gemini 官方', baseUrl: 'https://generativelanguage.googleapis.com', models: ['gemini-3-pro-image', 'gemini-3.1-flash-image'] },
-    openai: { label: 'OpenAI 官方', baseUrl: 'https://api.openai.com', models: ['gpt-image-2'] },
+    gemini: { label: 'Gemini', baseUrl: TOKENBOX_BASE_URL, models: ['gemini-3-pro-image', 'gemini-3.1-flash-image'] },
+    openai: { label: 'OpenAI', baseUrl: TOKENBOX_BASE_URL, models: ['gpt-image-2'] },
   },
   video: {
-    openai: { label: 'TokenBox / OpenAI 兼容', baseUrl: 'https://tokenbox.you/v1', models: ['doubao-seedance-2-0-260128'] },
-    volcengine: { label: 'Seedance 2.0 官方', baseUrl: 'https://ark.cn-beijing.volces.com', models: ['doubao-seedance-2-0-fast-260128', 'doubao-seedance-2-0-260128', 'doubao-seedance-2-0-mini-260615'] },
+    openai: { label: 'OpenAI', baseUrl: TOKENBOX_BASE_URL, models: ['doubao-seedance-2-0-260128'] },
+    volcengine: { label: 'Volcengine', baseUrl: TOKENBOX_BASE_URL, models: ['doubao-seedance-2-0-fast-260128', 'doubao-seedance-2-0-260128', 'doubao-seedance-2-0-mini-260615'] },
   },
 }
 function byType(t) { return cfgs.value.filter(c => c.service_type === t) }
@@ -450,9 +466,26 @@ function applyProviderPreset(type, provider) {
   const preset = providerPresets[type]?.[provider]
   if (!preset) return
   cfgForm.provider = provider
-  cfgForm.base_url = preset.baseUrl
+  cfgForm.base_url = TOKENBOX_BASE_URL
   cfgForm.modelStr = preset.models.join(', ')
   cfgForm.name = `${preset.label}-${serviceMeta[type].label}`
+}
+const selectedModels = computed(() => cfgForm.modelStr.split(',').map(s => s.trim()).filter(Boolean))
+function toggleModel(model) {
+  const selected = new Set(selectedModels.value)
+  if (selected.has(model)) selected.delete(model)
+  else selected.add(model)
+  cfgForm.modelStr = [...selected].join(', ')
+}
+async function fetchModels() {
+  if (!cfgForm.api_key) { toast.warning('请先填写 API Key'); return }
+  modelsLoading.value = true
+  try {
+    const result = await aiConfigAPI.models({ service_type: cfgForm.service_type, provider: cfgForm.provider, api_key: cfgForm.api_key, base_url: TOKENBOX_BASE_URL })
+    modelOptions.value = result.models || []
+    if (!modelOptions.value.length) toast.warning('上游未返回可用模型')
+  } catch (e) { toast.error(e.message) }
+  finally { modelsLoading.value = false }
 }
 
 async function loadCfgs() { try { cfgs.value = await aiConfigAPI.list() } catch (e) { toast.error(e.message) } }
@@ -461,6 +494,7 @@ async function delCfg(id) { await aiConfigAPI.del(id); toast.success('已删除'
 function startAddCfg(t) {
   cfgEditId.value = null
   cfgTestResult.value = null
+  modelOptions.value = []
   Object.assign(cfgForm, { name: '', provider: '', api_key: '', base_url: '', modelStr: '', service_type: t, priority: 0 })
   const firstPreset = presetsByType(t)[0]
   if (firstPreset) applyProviderPreset(t, firstPreset.provider)
@@ -469,11 +503,12 @@ function startAddCfg(t) {
 function startEditCfg(c) {
   cfgEditId.value = c.id
   cfgTestResult.value = null
+  modelOptions.value = []
   Object.assign(cfgForm, {
     name: c.name || '',
     provider: c.provider,
     api_key: c.api_key || '',
-    base_url: c.base_url || '',
+    base_url: TOKENBOX_BASE_URL,
     modelStr: fmtModel(c.model),
     service_type: c.service_type,
     priority: c.priority ?? 0,
@@ -497,7 +532,7 @@ async function testDraftCfg() {
     service_type: cfgForm.service_type,
     provider: cfgForm.provider,
     api_key: cfgForm.api_key,
-    base_url: cfgForm.base_url,
+    base_url: TOKENBOX_BASE_URL,
     model: cfgForm.modelStr.split(',').map(s => s.trim()).filter(Boolean),
   })
 }
@@ -507,7 +542,7 @@ async function testExistingCfg(c) {
     service_type: c.service_type,
     provider: c.provider,
     api_key: c.api_key || '',
-    base_url: c.base_url || '',
+    base_url: TOKENBOX_BASE_URL,
     model: Array.isArray(c.model) ? c.model : [],
   })
 }
@@ -515,8 +550,8 @@ async function saveCfg() {
   if (!cfgForm.provider) { toast.warning('选择服务商'); return }
   const models = cfgForm.modelStr.split(',').map(s => s.trim()).filter(Boolean)
   try {
-    if (cfgEditId.value) await aiConfigAPI.update(cfgEditId.value, { name: cfgForm.name, provider: cfgForm.provider, api_key: cfgForm.api_key, base_url: cfgForm.base_url, model: models, priority: cfgForm.priority })
-    else await aiConfigAPI.create({ service_type: cfgForm.service_type, provider: cfgForm.provider, name: cfgForm.name || `${cfgForm.provider}-${cfgForm.service_type}`, api_key: cfgForm.api_key, base_url: cfgForm.base_url, model: models, priority: cfgForm.priority })
+    if (cfgEditId.value) await aiConfigAPI.update(cfgEditId.value, { name: cfgForm.name, provider: cfgForm.provider, api_key: cfgForm.api_key, base_url: TOKENBOX_BASE_URL, model: models, priority: cfgForm.priority })
+    else await aiConfigAPI.create({ service_type: cfgForm.service_type, provider: cfgForm.provider, name: cfgForm.name || `${cfgForm.provider}-${cfgForm.service_type}`, api_key: cfgForm.api_key, base_url: TOKENBOX_BASE_URL, model: models, priority: cfgForm.priority })
     cfgDialog.value = false; toast.success('已保存'); loadCfgs()
   } catch (e) { toast.error(e.message) }
 }
@@ -990,6 +1025,10 @@ onMounted(() => { loadCfgs(); loadAgents(); loadAllSkills(); loadStylePresets() 
 /* Dialogs */
 .config-dialog { width: min(720px, calc(100vw - 40px)); }
 .config-dialog-body { display: flex; flex-direction: column; gap: 14px; }
+.model-fetch-row { display: flex; align-items: center; gap: 10px; }
+.model-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; max-height: 180px; overflow-y: auto; padding: 10px; border: 1px solid var(--border); background: var(--surface-2); }
+.model-option { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; color: var(--text-2); }
+.model-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-dialog { width: 440px; }
 .skill-dialog-body { display: flex; flex-direction: column; gap: 12px; }
 .dialog-sub { margin-top: 4px; font-size: 12px; color: var(--text-2); }

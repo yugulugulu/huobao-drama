@@ -6,6 +6,7 @@ import { toSnakeCaseArray, toSnakeCase } from '../utils/transform.js'
 import { getActiveConfigId } from '../services/ai.js'
 import { EXTRACT_TARGETS, getExtractionStatus, startExtraction, type ExtractTarget } from '../services/extraction.js'
 import { getVideoPromptBatchStatus, startVideoPromptBatch } from '../services/video-prompts.js'
+import { getStoryboardBreakdownStatus, startStoryboardBreakdown } from '../services/storyboard-breakdown.js'
 import { currentUser } from '../middleware/auth.js'
 import { findOwnedEpisode, findOwnedDrama } from '../services/ownership.js'
 
@@ -179,6 +180,28 @@ app.get('/:id/video-prompts-status', async (c) => {
   const id = Number(c.req.param('id'))
   if (!await findOwnedEpisode(id, currentUser(c).id)) return notFound(c, '剧集不存在')
   return success(c, getVideoPromptBatchStatus(id))
+})
+
+// POST /episodes/:id/break-storyboard — 异步拆分分镜，立即返回并由前端轮询状态
+app.post('/:id/break-storyboard', async (c) => {
+  const id = Number(c.req.param('id'))
+  const userId = currentUser(c).id
+  const body = await c.req.json().catch(() => ({}))
+  const ep = await findOwnedEpisode(id, userId)
+  if (!ep) return notFound(c, '剧集不存在')
+  if (!body.message) return badRequest(c, 'message required')
+  const started = startStoryboardBreakdown(ep.id, ep.dramaId, {
+    userId, message: body.message, model: body.model || undefined, configId: body.config_id ?? undefined,
+  })
+  return success(c, { status: 'running', already_running: !started })
+})
+
+// GET /episodes/:id/break-storyboard-status — 查询分镜拆分任务
+app.get('/:id/break-storyboard-status', async (c) => {
+  const id = Number(c.req.param('id'))
+  const userId = currentUser(c).id
+  if (!await findOwnedEpisode(id, userId)) return notFound(c, '剧集不存在')
+  return success(c, getStoryboardBreakdownStatus(userId, id))
 })
 
 // GET /episodes/:episode_id/storyboards

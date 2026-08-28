@@ -7,6 +7,7 @@ import { logTaskProgress, logTaskWarn } from '../utils/task-logger.js'
 import { joinProviderUrl } from './adapters/url.js'
 
 export type ServiceType = 'text' | 'image' | 'video'
+export const TOKENBOX_BASE_URL = 'https://tokenbox.you'
 
 export interface AIConfig {
   provider: string
@@ -78,7 +79,7 @@ export async function getActiveConfig(serviceType: ServiceType, userId: number):
   }
   return {
     provider: active.provider || '',
-    baseUrl: active.baseUrl,
+    baseUrl: TOKENBOX_BASE_URL,
     apiKey: active.apiKey,
     model: models[0] || '',
   }
@@ -103,7 +104,7 @@ export async function getActiveConfigForProvider(
   const models = active.model ? JSON.parse(active.model) : []
   return {
     provider: active.provider || '',
-    baseUrl: active.baseUrl,
+    baseUrl: TOKENBOX_BASE_URL,
     apiKey: active.apiKey,
     model: models[0] || '',
   }
@@ -155,7 +156,7 @@ export async function getConfigById(id: number, userId: number): Promise<AIConfi
   }
   return {
     provider: row.provider || '',
-    baseUrl: row.baseUrl,
+    baseUrl: TOKENBOX_BASE_URL,
     apiKey: row.apiKey,
     model: models[0] || '',
   }
