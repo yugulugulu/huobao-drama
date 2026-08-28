@@ -97,6 +97,10 @@ async function validateStoryboardBindings(userId: number, episodeId: number, dra
 
 type ToolContext = ToolExecutionContext | undefined
 
+function isNullText(value: unknown): boolean {
+  return value == null || (typeof value === 'string' && value.trim().toLowerCase() === 'null')
+}
+
 function requireIds(context: ToolContext): { userId: number; episodeId: number; dramaId: number } | { error: string } {
   const userId = getUserId(context?.requestContext)
   const episodeId = getEpisodeId(context?.requestContext)
@@ -312,19 +316,19 @@ const updateStoryboard = createTool({
   description: 'Update a specific storyboard shot.',
   inputSchema: z.object({
     storyboard_id: z.number(),
-    title: z.string().optional(),
-    shot_type: z.string().optional(),
-    angle: z.string().optional(),
-    movement: z.string().optional(),
-    location: z.string().optional(),
-    time: z.string().optional(),
-    result: z.string().optional(),
-    atmosphere: z.string().optional(),
-    image_prompt: z.string().optional(),
-    video_prompt: z.string().optional(),
-    bgm_prompt: z.string().optional(),
-    sound_effect: z.string().optional(),
-    description: z.string().optional(),
+    title: z.string().nullable().optional(),
+    shot_type: z.string().nullable().optional(),
+    angle: z.string().nullable().optional(),
+    movement: z.string().nullable().optional(),
+    location: z.string().nullable().optional(),
+    time: z.string().nullable().optional(),
+    result: z.string().nullable().optional(),
+    atmosphere: z.string().nullable().optional(),
+    image_prompt: z.string().nullable().optional(),
+    video_prompt: z.string().nullable().optional(),
+    bgm_prompt: z.string().nullable().optional(),
+    sound_effect: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
     scene_id: z.number().nullable().optional(),
     character_ids: z.array(z.number()).optional(),
     prop_ids: z.array(z.number()).optional(),
@@ -365,19 +369,20 @@ const updateStoryboard = createTool({
     )
 
     const updates: Record<string, any> = { updatedAt: now() }
-    if ('title' in fields) updates.title = fields.title
-    if ('shot_type' in fields) updates.shotType = fields.shot_type
-    if ('angle' in fields) updates.angle = fields.angle
-    if ('movement' in fields) updates.movement = fields.movement
-    if ('location' in fields) updates.location = fields.location
-    if ('time' in fields) updates.time = fields.time
-    if ('result' in fields) updates.result = fields.result
-    if ('atmosphere' in fields) updates.atmosphere = fields.atmosphere
-    if ('image_prompt' in fields) updates.imagePrompt = fields.image_prompt
-    if ('video_prompt' in fields) updates.videoPrompt = fields.video_prompt
-    if ('bgm_prompt' in fields) updates.bgmPrompt = fields.bgm_prompt
-    if ('sound_effect' in fields) updates.soundEffect = fields.sound_effect
-    if ('description' in fields) updates.description = fields.description
+    // 模型有时会把未修改字段回传为 null 或字符串 "null"，忽略这些值以免覆盖已有内容。
+    if ('title' in fields && !isNullText(fields.title)) updates.title = fields.title
+    if ('shot_type' in fields && !isNullText(fields.shot_type)) updates.shotType = fields.shot_type
+    if ('angle' in fields && !isNullText(fields.angle)) updates.angle = fields.angle
+    if ('movement' in fields && !isNullText(fields.movement)) updates.movement = fields.movement
+    if ('location' in fields && !isNullText(fields.location)) updates.location = fields.location
+    if ('time' in fields && !isNullText(fields.time)) updates.time = fields.time
+    if ('result' in fields && !isNullText(fields.result)) updates.result = fields.result
+    if ('atmosphere' in fields && !isNullText(fields.atmosphere)) updates.atmosphere = fields.atmosphere
+    if ('image_prompt' in fields && !isNullText(fields.image_prompt)) updates.imagePrompt = fields.image_prompt
+    if ('video_prompt' in fields && typeof fields.video_prompt === 'string' && !isNullText(fields.video_prompt) && fields.video_prompt.trim()) updates.videoPrompt = fields.video_prompt
+    if ('bgm_prompt' in fields && !isNullText(fields.bgm_prompt)) updates.bgmPrompt = fields.bgm_prompt
+    if ('sound_effect' in fields && !isNullText(fields.sound_effect)) updates.soundEffect = fields.sound_effect
+    if ('description' in fields && !isNullText(fields.description)) updates.description = fields.description
     if ('scene_id' in fields) updates.sceneId = fields.scene_id
     if ('duration' in fields) updates.duration = fields.duration
     await db.update(schema.storyboards).set(updates)

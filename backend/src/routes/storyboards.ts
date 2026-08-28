@@ -9,6 +9,10 @@ import { findOwnedEpisode, findOwnedStoryboard } from '../services/ownership.js'
 
 const app = new Hono()
 
+function isNullText(value: unknown): boolean {
+  return value == null || (typeof value === 'string' && value.trim().toLowerCase() === 'null')
+}
+
 async function syncStoryboardCharacters(storyboardId: number, characterIds: number[]) {
   await db.delete(schema.storyboardCharacters)
     .where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
@@ -145,7 +149,12 @@ app.put('/:id', async (c) => {
 
   const updates: Record<string, any> = { updatedAt: now() }
   for (const [snakeKey, camelKey] of Object.entries(fieldMap)) {
-    if (snakeKey in body) updates[camelKey] = body[snakeKey]
+    if (!(snakeKey in body)) continue
+    const value = body[snakeKey]
+    // scene_id 仍允许显式清空；其它字段忽略异常 null 文本。
+    if (snakeKey !== 'scene_id' && isNullText(value)) continue
+    if (snakeKey === 'video_prompt' && typeof value === 'string' && !value.trim()) continue
+    updates[camelKey] = value
   }
 
   await validateStoryboardBindings(
