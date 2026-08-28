@@ -28,7 +28,7 @@ export async function extractVideoPoster(relativePath: string): Promise<string |
     const posterRel = posterPathFor(relativePath)
     const source = await materializeStorageFile(relativePath)
     cleanupSource = source.cleanup
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'huobao-poster-'))
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-poster-'))
     const posterAbs = path.join(tempDir, 'poster.jpg')
     await new Promise<void>((resolve, reject) => {
       ffmpeg(source.path)

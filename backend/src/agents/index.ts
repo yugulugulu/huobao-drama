@@ -155,7 +155,7 @@ let lastLoggedTextEndpointKey = ''
 const thinkingOffEnabled = (process.env.AI_DISABLE_THINKING ?? 'true').toLowerCase() !== 'false'
 
 function isOfficialTextHost(baseURL: string) {
-  return /api\.openai\.com|generativelanguage\.googleapis\.com/.test(baseURL)
+  return /api\.openai\.com|api\.deepseek\.com|generativelanguage\.googleapis\.com/.test(baseURL)
 }
 
 function openaiThinkingOffPatch(): Record<string, any> {
@@ -174,7 +174,7 @@ function openaiThinkingOffPatch(): Record<string, any> {
   }
 }
 
-function createThinkingOffFetch(providerName: string, baseURL: string): typeof fetch | undefined {
+function createThinkingOffFetch(providerName: string, baseURL: string, modelName = ''): typeof fetch | undefined {
   if (!thinkingOffEnabled || isOfficialTextHost(baseURL)) return undefined
   const openaiPatch = openaiThinkingOffPatch()
 
@@ -191,7 +191,11 @@ function createThinkingOffFetch(providerName: string, baseURL: string): typeof f
           init = { ...init, body: JSON.stringify(body) }
         } else if (Array.isArray(body?.messages)) {
           // OpenAI 兼容格式
-          Object.assign(body, openaiPatch)
+          const isDeepSeek = providerName === 'deepseek' || modelName.toLowerCase().startsWith('deepseek')
+          const patch = isDeepSeek
+            ? Object.fromEntries(Object.entries(openaiPatch).filter(([key]) => key !== 'reasoning_effort'))
+            : openaiPatch
+          Object.assign(body, patch)
           init = { ...init, body: JSON.stringify(body) }
         }
       }
@@ -220,7 +224,7 @@ async function getModel(userId: number, fileModel: string | undefined, modelOver
     const googleProvider = createGoogleGenerativeAI({
       apiKey: textConfig.apiKey,
       baseURL: resolvedBaseURL,
-      fetch: createThinkingOffFetch(providerName, resolvedBaseURL),
+      fetch: createThinkingOffFetch(providerName, resolvedBaseURL, modelName),
     })
     return googleProvider(modelName)
   }
@@ -228,7 +232,7 @@ async function getModel(userId: number, fileModel: string | undefined, modelOver
   const provider = createOpenAI({
     baseURL: resolvedBaseURL,
     apiKey: textConfig.apiKey,
-    fetch: createThinkingOffFetch(providerName, resolvedBaseURL),
+    fetch: createThinkingOffFetch(providerName, resolvedBaseURL, modelName),
   } as any)
   return provider.chat(modelName)
 }

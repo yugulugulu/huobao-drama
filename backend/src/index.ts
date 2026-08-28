@@ -88,5 +88,5 @@ if (process.env.SERVE_FRONTEND !== 'false') {
 
 const port = Number(process.env.PORT || 5679)
 await recoverProcessingGenerationTasks()
-console.log(`🚀 Huobao Drama TS server on http://localhost:${port}`)
+console.log(`🚀 AI Drama Studio server on http://localhost:${port}`)
 serve({ fetch: app.fetch, port })

@@ -74,7 +74,7 @@ export async function mergeEpisodeVideos(userId: number, episodeId: number, dram
 }
 
 async function doMerge(userId: number, mergeId: number, episodeId: number, videos: string[]) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `huobao-merge-${mergeId}-`))
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `studio-merge-${mergeId}-`))
   const sources: Array<{ path: string; cleanup: () => void }> = []
   const outputFilename = `${uuid()}.mp4`
   const outputPath = path.join(tempDir, outputFilename)

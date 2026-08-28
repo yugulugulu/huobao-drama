@@ -1,4 +1,4 @@
-# 🎬 Huobao Drama - AI 短剧生成平台
+# 🎬 AI Drama Studio - AI 短剧生成平台
 
 <div align="center">
 
@@ -10,11 +10,11 @@
 
 [功能特性](#功能特性) • [快速开始](#快速开始) • [部署指南](#部署指南)
 
-<h2>🔑 <a href="https://api.chatfire.site">获取 Huobao API Key 👉 立即查看</a></h2>
+<h2>🔑 <a href="https://api.chatfire.site">获取 API Key 👉 立即查看</a></h2>
 
 **文本 · 图片 · 视频全部 AI 能力，一个 Key 即可开通**
 
-部署完成后在「设置 → 火宝快捷配置」粘贴 Key，一键写入三条推荐配置，开箱即用
+部署完成后在「设置 → 手动模板」按服务类型添加配置，开箱即用
 
 </div>
 
@@ -22,7 +22,7 @@
 
 ## 📖 项目简介
 
-Huobao Drama 是一个基于 AI 的短剧自动化生产平台，实现从剧本生成、角色设计、分镜制作到视频合成的全流程自动化。
+AI Drama Studio 是一个基于 AI 的短剧自动化生产平台，实现从剧本生成、角色设计、分镜制作到视频合成的全流程自动化。
 
 ### 🎯 核心价值
 
@@ -112,8 +112,8 @@ docker/     — init.sql 数据库初始化脚本(可选，启动时自动建表
 |---|---|---|
 | `DATABASE_URL` | — | 完整 MySQL 连接串（优先） |
 | `MYSQL_HOST` / `MYSQL_PORT` | `127.0.0.1` / `3306` | 未设 `DATABASE_URL` 时分项配置 |
-| `MYSQL_USER` / `MYSQL_PASSWORD` | `huobao` / `huobao` | 同上 |
-| `MYSQL_DATABASE` | `huobao_drama` | 同上 |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | 由部署环境提供 | 同上 |
+| `MYSQL_DATABASE` | 由部署环境提供 | 同上 |
 | `PORT` | `5679` | 后端服务端口 |
 | `STORAGE_PATH` | `./data/static` | 生成文件存储目录 |
 
@@ -123,8 +123,8 @@ docker/     — init.sql 数据库初始化脚本(可选，启动时自动建表
 
 ```bash
 # 克隆项目
-git clone https://github.com/chatfire-AI/huobao-drama.git
-cd huobao-drama
+git clone https://github.com/chatfire-AI/ai-drama-studio.git
+cd ai-drama-studio
 
 # 安装后端依赖
 cd backend && npm install
@@ -185,8 +185,8 @@ DATABASE_URL=mysql://huobao:huobao@127.0.0.1:3306/huobao_drama npm start
 启动后所有 AI 功能（文本/生图/视频）都需要先配置模型服务，未配置时页面顶部会有横幅引导：
 
 1. 打开「设置」页
-2. 在「火宝快捷配置」中粘贴 Huobao API Key（[前往 api.chatfire.site 获取](https://api.chatfire.site)），一键写入文本、图片、视频三条推荐配置
-3. 或使用「手动模板」按厂商逐个添加，支持连通性测试
+2. 在「手动模板」中按服务类型和厂商逐个添加配置，填写 API Key、Base URL 和模型
+3. 文本服务支持连通性测试
 
 配置完成横幅自动消失，即可开始创建剧集生产。
 
@@ -229,20 +229,20 @@ docker compose down
 
 ```bash
 # 拉取镜像
-docker pull huobao/huobao-drama:3.0.0
+docker pull ai-drama-studio/ai-drama-studio:3.0.0
 
 # 运行(MySQL 需另行准备,通过 DATABASE_URL 指向;命名卷自动从镜像初始化 skills 等内容)
 docker run -d \
-  --name huobao-drama \
+  --name ai-drama-studio \
   -p 5679:5679 \
   -v huobao-data:/app/data \
   -v huobao-workspace:/app/backend/workspace \
   -e DATABASE_URL=mysql://huobao:huobao@host.docker.internal:3306/huobao_drama \
   --restart unless-stopped \
-  huobao/huobao-drama:3.0.0
+  ai-drama-studio/ai-drama-studio:3.0.0
 
 # 查看日志
-docker logs -f huobao-drama
+docker logs -f ai-drama-studio
 ```
 
 > **注意**：Linux 用户需添加 `--add-host=host.docker.internal:host-gateway` 以访问宿主机服务
@@ -250,7 +250,7 @@ docker logs -f huobao-drama
 **从源码构建**（可选，需克隆仓库）：
 
 ```bash
-docker build -t huobao-drama:latest .
+docker build -t ai-drama-studio:latest .
 ```
 
 **Docker 部署优势：**
@@ -315,7 +315,7 @@ server {
     # 生成的图片/视频直连磁盘，不经过 Node：sendfile 零拷贝 + 长缓存
     # （产物按 uuid 命名、内容不变，可安全 immutable 缓存）
     location /static/ {
-        alias /path/to/huobao-drama/data/static/;
+        alias /path/to/ai-drama-studio/data/static/;
         sendfile on;
         tcp_nopush on;
         expires 1y;
@@ -370,7 +370,7 @@ A: 无需安装。项目内置 `ffmpeg-static` / `ffprobe-static` 二进制（�
 
 ### Q: 页面顶部提示「尚未配置模型」？
 
-A: 这是正常的首次部署引导。前往「设置」页，用「火宝快捷配置」粘贴 API Key 一键写入，或通过「手动模板」按厂商添加。文本、图片、视频三类均有启用中的配置后横幅自动消失。
+A: 这是正常的首次部署引导。前往「设置」页，通过「手动模板」按服务类型添加配置。文本、图片、视频三类均有启用中的配置后横幅自动消失。
 
 ### Q: 前端无法连接后端 API？
 
@@ -396,7 +396,7 @@ A: 后端会在首次启动时自动创建所有表，检查日志确认初始�
   - 新增 `docker/init.sql` 及导出脚本（DBA 审核 / 预建表）
 - 首次使用引导
   - 未配置 AI 服务时全站顶部横幅提示并引导至设置页
-  - 设置页新增「火宝快捷配置」：一个 Key 写入文本/图片/视频三条推荐配置
+  - 设置页提供「手动模板」：按服务类型快速填充官方推荐配置
   - 未配置模型的报错中文化并指引设置页
 - 视频模型默认调整为 Seedance 2.0 Fast
 - 厂商收敛：仅保留 OpenAI / Gemini / 火山引擎

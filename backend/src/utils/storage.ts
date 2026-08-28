@@ -201,7 +201,7 @@ export async function materializeStorageFile(reference: string): Promise<{ path:
   if (!/^https?:\/\//.test(reference)) {
     return { path: getAbsolutePath(reference), cleanup: () => {} }
   }
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'huobao-storage-'))
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-storage-'))
   const ext = getExtFromUrl(reference)
   const tempPath = path.join(tempDir, `source${ext}`)
   fs.writeFileSync(tempPath, await readStorageBuffer(reference))

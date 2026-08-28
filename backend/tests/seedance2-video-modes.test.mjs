@@ -30,10 +30,10 @@ test('volcengine video adapter only supports Seedance 2.0 models and reference m
   assert.match(adapter, /参考音频需要至少 1 个参考图片或视频/)
   assert.match(adapter, /多模态参考模式需要至少一个参考素材或 prompt/)
 
-  // generate_audio 可配置（默认开），时长支持 4-15 秒；分辨率随集固定（480p/720p，默认 720p）
+  // generate_audio 可配置（默认开），时长支持 4-15 秒；分辨率随集固定（720p/1080p/4k，默认 720p）
   assert.match(adapter, /generate_audio:\s*record\.generateAudio/)
   assert.match(adapter, /Math\.min\(15, Math\.max\(4, parsed\)\)/)
-  assert.match(adapter, /resolution: record\.resolution === '480p' \? '480p' : '720p'/)
+  assert.match(adapter, /\['720p', '1080p', '4k'\]\.includes\(record\.resolution \|\| ''\)/)
 })
 
 test('video generation service resolves reference media and persists new fields', () => {
@@ -55,16 +55,16 @@ test('video resolution is fixed per episode, editable, and locked into video tas
   const tasks = read('src/routes/tasks.ts')
   const service = read('src/services/generation.ts')
 
-  // 创建集时固定（默认 720p，仅接受 480p/720p）
-  assert.match(episodes, /resolution: body\.resolution === '480p' \? '480p' : '720p'/)
+  // 创建集时固定（默认 720p，仅接受 720p/1080p/4k）
+  assert.match(episodes, /\['720p', '1080p', '4k'\]\.includes\(body\.resolution\)/)
   // PUT 可修改，白名单校验
   assert.match(episodes, /'status', 'resolution'\]/)
-  assert.match(episodes, /resolution 只支持 480p \/ 720p/)
+  assert.match(episodes, /resolution 只支持 720p \/ 1080p \/ 4k/)
   // 视频任务锁定集的分辨率（优先于请求体）
   assert.match(tasks, /episodeResolution = ep\.resolution/)
   assert.match(tasks, /resolution: episodeResolution \|\| body\.resolution/)
   // 服务落入 params 并传给适配器
-  assert.match(service, /resolution: params\.resolution === '480p' \? '480p' : '720p'/)
+  assert.match(service, /\['720p', '1080p', '4k'\]\.includes\(params\.resolution \|\| ''\)/)
   assert.match(service, /resolution: params\.resolution,/)
 })
 

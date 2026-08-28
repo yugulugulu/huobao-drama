@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'huobao:pending-image-assets'
+const STORAGE_KEY = 'studio:pending-image-assets'
 const MAX_PENDING_AGE_MS = 15 * 60 * 1000
 
 export function usePendingImageAssets() {
