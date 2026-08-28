@@ -30,7 +30,7 @@ function cookieValue(header: string | undefined, name: string): string | null {
 function tokenFromRequest(c: Context): string | null {
   const authorization = c.req.header('Authorization')
   if (authorization?.startsWith('Bearer ')) return authorization.slice(7).trim()
-  return cookieValue(c.req.header('Cookie'), 'huobao_token')
+  return cookieValue(c.req.header('Cookie'), 'studio_token')
 }
 
 export async function createAccessToken(user: AuthUser): Promise<string> {
@@ -41,12 +41,12 @@ export async function createAccessToken(user: AuthUser): Promise<string> {
 /** 为浏览器写入不可被 JavaScript 读取的会话 Cookie。 */
 export function setAuthCookie(c: Context, token: string) {
   const secure = process.env.COOKIE_SECURE === 'true'
-  c.header('Set-Cookie', `huobao_token=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${JWT_TTL_SECONDS}${secure ? '; Secure' : ''}`)
+  c.header('Set-Cookie', `studio_token=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${JWT_TTL_SECONDS}${secure ? '; Secure' : ''}`)
 }
 
 export function clearAuthCookie(c: Context) {
   const secure = process.env.COOKIE_SECURE === 'true'
-  c.header('Set-Cookie', `huobao_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`)
+  c.header('Set-Cookie', `studio_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`)
 }
 
 /** 全局中间件：验证 Token 后将认证用户放入 Hono Context。 */

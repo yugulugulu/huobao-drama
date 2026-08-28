@@ -119,7 +119,7 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
     generateAudio: params.generateAudio === false ? 0 : 1,
     duration: params.duration || 5,
     aspectRatio: params.aspectRatio || '16:9',
-    resolution: params.resolution === '480p' ? '480p' : '720p',
+    resolution: ['720p', '1080p', '4k'].includes(params.resolution || '') ? params.resolution : '720p',
   })
 
   logTaskStart('VideoTask', 'enqueue', {

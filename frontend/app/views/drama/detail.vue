@@ -566,12 +566,13 @@ const deletingEpisode = ref(false)
 // 视频分辨率：创建集时固定（持久化到 episodes.resolution），集卡片上可修改
 const resolutionOptions = [
   { label: '720p · 高清', value: '720p' },
-  { label: '480p · 流畅', value: '480p' },
+  { label: '1080p · 全高清', value: '1080p' },
+  { label: '4K · 超高清', value: '4k' },
 ]
 const newEpisodeResolution = ref('720p')
 const epResMenuId = ref(null)
 
-function epResolution(ep) { return ep.resolution === '480p' ? '480p' : '720p' }
+function epResolution(ep) { return ['720p', '1080p', '4k'].includes(ep.resolution) ? ep.resolution : '720p' }
 
 async function setEpisodeResolution(ep, resolution) {
   epResMenuId.value = null

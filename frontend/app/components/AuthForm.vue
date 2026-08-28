@@ -2,7 +2,7 @@
   <section class="auth-form-wrap">
     <div class="auth-heading">
       <p>{{ mode === 'login' ? '欢迎回来' : '创建工作空间账号' }}</p>
-      <h1>{{ mode === 'login' ? '登录火宝短剧' : '注册火宝短剧' }}</h1>
+      <h1>{{ mode === 'login' ? '登录工作台' : '注册工作台' }}</h1>
     </div>
 
     <form class="auth-form" @submit.prevent="submit">

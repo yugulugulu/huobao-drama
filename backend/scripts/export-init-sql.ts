@@ -27,7 +27,7 @@ const legacyBackfillSql = new Set(mysqlColumnBackfillStatements.map(({ sql }) =>
 const freshDatabaseStatements = tenantMigrationStatements.filter(sql => !legacyBackfillSql.has(sql))
 
 sections.push(`-- ============================================================================
--- Huobao Drama 初始化 SQL
+-- AI Drama Studio 初始化 SQL
 -- 由 backend/scripts/export-init-sql.ts 从 backend/src/db/mysql-schema.ts 生成
 -- 生成时间: ${new Date().toISOString()}
 --

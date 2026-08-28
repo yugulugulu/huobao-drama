@@ -47,7 +47,7 @@ function buildProbe(serviceType: string, provider: string, baseUrl: string, mode
     return { method: 'POST', url: url.toString(), headers: geminiHeaders(apiKey, true), body: {} }
   }
 
-  if (p === 'openai') {
+  if (p === 'openai' || p === 'deepseek') {
     if (serviceType === 'video') {
       return {
         method: 'POST',
@@ -105,20 +105,22 @@ app.post('/', async (c) => {
   const body = await c.req.json()
   const userId = currentUser(c).id
   const ts = now()
+  const serviceType = typeof body.service_type === 'string' ? body.service_type.trim().toLowerCase() : body.service_type
+  const provider = typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : body.provider
 
   // 验证必填字段
-  if (!body.service_type || !body.provider) {
+  if (!serviceType || !provider) {
     return badRequest(c, 'service_type and provider are required')
   }
-  if (!isOfficialProvider(body.service_type, body.provider)) {
+  if (!isOfficialProvider(serviceType, provider)) {
     return badRequest(c, 'Unsupported service_type/provider')
   }
 
   const res = await db.insert(schema.aiServiceConfigs).values({
     userId,
-    serviceType: body.service_type,
-    provider: body.provider,
-    name: body.name || `${body.provider}-${body.service_type}`,
+    serviceType,
+    provider,
+    name: body.name || `${provider}-${serviceType}`,
     baseUrl: body.base_url || '',
     apiKey: body.api_key || '',
     model: JSON.stringify(body.model || []),
@@ -140,20 +142,22 @@ app.post('/', async (c) => {
 // POST /ai-configs/test
 app.post('/test', async (c) => {
   const body = await c.req.json()
-  if (!body.service_type || !body.provider || !body.base_url) {
+  const serviceType = typeof body.service_type === 'string' ? body.service_type.trim().toLowerCase() : body.service_type
+  const provider = typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : body.provider
+  if (!serviceType || !provider || !body.base_url) {
     return badRequest(c, 'service_type, provider and base_url are required')
   }
-  if (!isOfficialProvider(body.service_type, body.provider)) {
+  if (!isOfficialProvider(serviceType, provider)) {
     return badRequest(c, 'Unsupported service_type/provider')
   }
 
   const model = Array.isArray(body.model) ? body.model[0] : body.model
-  const probe = buildProbe(body.service_type, body.provider, body.base_url, model, body.api_key)
+  const probe = buildProbe(serviceType, provider, body.base_url, model, body.api_key)
   const probeUrl = redactUrl(probe.url)
 
   logTaskProgress('AIConfig', 'probe-start', {
-    serviceType: body.service_type,
-    provider: body.provider,
+    serviceType,
+    provider,
     method: probe.method,
     url: probeUrl,
   })
@@ -229,16 +233,18 @@ app.put('/:id', async (c) => {
   const [existing] = await db.select().from(schema.aiServiceConfigs).where(and(eq(schema.aiServiceConfigs.id, id), eq(schema.aiServiceConfigs.userId, userId)))
   if (!existing) return notFound(c)
 
-  const serviceType = 'service_type' in body ? body.service_type : existing.serviceType
-  const provider = 'provider' in body ? body.provider : existing.provider
+  const rawServiceType = 'service_type' in body ? body.service_type : existing.serviceType
+  const rawProvider = 'provider' in body ? body.provider : existing.provider
+  const serviceType = typeof rawServiceType === 'string' ? rawServiceType.trim().toLowerCase() : rawServiceType
+  const provider = typeof rawProvider === 'string' ? rawProvider.trim().toLowerCase() : rawProvider
   if (!isOfficialProvider(serviceType, provider)) {
     return badRequest(c, 'Unsupported service_type/provider')
   }
 
   const updates: Record<string, any> = { updatedAt: now() }
 
-  if ('service_type' in body) updates.serviceType = body.service_type
-  if ('provider' in body) updates.provider = body.provider
+  if ('service_type' in body) updates.serviceType = serviceType
+  if ('provider' in body) updates.provider = provider
   if ('name' in body) updates.name = body.name
   if ('base_url' in body) updates.baseUrl = body.base_url
   if ('api_key' in body) updates.apiKey = body.api_key

@@ -16,20 +16,22 @@ export interface AIConfig {
 }
 
 export const officialProviders: Record<ServiceType, readonly string[]> = {
-  text: ['openai', 'gemini', 'volcengine'],
+  text: ['openai', 'gemini', 'deepseek', 'volcengine'],
   image: ['openai', 'gemini', 'volcengine'],
   video: ['openai', 'volcengine'],
 }
 
 export function isOfficialProvider(serviceType?: string | null, provider?: string | null): boolean {
-  const providers = officialProviders[serviceType as ServiceType]
-  return !!providers && providers.includes((provider || '').toLowerCase())
+  const normalizedServiceType = (serviceType || '').trim().toLowerCase() as ServiceType
+  const normalizedProvider = (provider || '').trim().toLowerCase()
+  const providers = officialProviders[normalizedServiceType]
+  return !!providers && providers.includes(normalizedProvider)
 }
 
 export function getTextProviderBaseUrl(config: AIConfig) {
   const provider = config.provider.toLowerCase()
 
-  if (provider === 'openai') {
+  if (provider === 'openai' || provider === 'deepseek') {
     return joinProviderUrl(config.baseUrl, '/v1', '')
   }
 

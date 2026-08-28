@@ -37,8 +37,8 @@ app.post('/', async (c) => {
     title: body.title || `第${nextNum}集`,
     imageConfigId,
     videoConfigId,
-    // 视频分辨率在创建集时固定（480p/720p），后续可通过 PUT 修改
-    resolution: body.resolution === '480p' ? '480p' : '720p',
+    // 视频分辨率在创建集时固定，后续可通过 PUT 修改
+    resolution: ['720p', '1080p', '4k'].includes(body.resolution) ? body.resolution : '720p',
     createdAt: ts,
     updatedAt: ts,
   })
@@ -68,8 +68,8 @@ app.put('/:id', async (c) => {
     if (key in body) updates[key] = body[key]
   }
   if (Object.keys(updates).length === 0) return badRequest(c, 'no valid fields')
-  if ('resolution' in updates && !['480p', '720p'].includes(updates.resolution)) {
-    return badRequest(c, 'resolution 只支持 480p / 720p')
+  if ('resolution' in updates && !['720p', '1080p', '4k'].includes(updates.resolution)) {
+    return badRequest(c, 'resolution 只支持 720p / 1080p / 4k')
   }
 
   // Map snake_case to camelCase for drizzle

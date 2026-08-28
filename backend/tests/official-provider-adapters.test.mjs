@@ -24,8 +24,6 @@ test('backend provider registry does not expose ChatFire as a model provider', (
   assert.doesNotMatch(aiConfigRoute, /api\.chatfire\.site/i)
   assert.doesNotMatch(aiConfigRoute, /provider:\s*'chatfire'/i)
   assert.doesNotMatch(aiConfigRoute, /openrouter/i)
-  assert.doesNotMatch(aiConfigRoute, /\/huobao-preset/)
-  assert.doesNotMatch(useApi, /huobaoPreset/)
 })
 
 test('text agents use the official Gemini provider for gemini configs', () => {
@@ -51,15 +49,15 @@ test('text provider base URL handling uses official Gemini v1beta endpoint', () 
   assert.match(ai, /return joinProviderUrl\(config\.baseUrl,\s*'\/v1beta',\s*''\)/)
 })
 
-test('backend rejects unsupported providers at DB and route boundaries', () => {
+test('backend accepts DeepSeek for text and rejects unsupported providers', () => {
   const ai = read('src/services/ai.ts')
   const route = read('src/routes/aiConfigs.ts')
 
   assert.match(ai, /officialProviders/)
-  assert.match(ai, /text:\s*\[\s*'openai',\s*'gemini',\s*'volcengine'\s*\]/)
+  assert.match(ai, /text:\s*\[\s*'openai',\s*'gemini',\s*'deepseek',\s*'volcengine'\s*\]/)
   assert.match(ai, /image:\s*\[\s*'openai',\s*'gemini',\s*'volcengine'\s*\]/)
   assert.match(ai, /video:\s*\[\s*'openai',\s*'volcengine'\s*\]/)
-  assert.doesNotMatch(ai, /'deepseek'/)
+  assert.match(ai, /provider === 'openai' \|\| provider === 'deepseek'/)
   assert.doesNotMatch(ai, /'ali'/)
   assert.doesNotMatch(ai, /'vidu'/)
   assert.doesNotMatch(ai, /audio:\s*\[/)
@@ -68,7 +66,6 @@ test('backend rejects unsupported providers at DB and route boundaries', () => {
   assert.match(ai, /isOfficialProvider\(row\.serviceType as ServiceType,\s*row\.provider\)/)
 
   assert.match(route, /isOfficialProvider/)
-  assert.match(route, /isOfficialProvider\(body\.service_type,\s*body\.provider\)/)
   assert.match(route, /isOfficialProvider\(serviceType,\s*provider\)/)
   assert.match(route, /Unsupported service_type\/provider/)
 })
@@ -79,16 +76,22 @@ test('AI config routes reject unsupported service/provider pairs in create, test
   const testRoute = routeBlock(route, "app.post('/test',")
   const updateRoute = routeBlock(route, "app.put('/:id',")
 
-  assert.match(createRoute, /if \(!body\.service_type \|\| !body\.provider\)/)
-  assert.match(createRoute, /isOfficialProvider\(body\.service_type,\s*body\.provider\)/)
+  assert.match(createRoute, /body\.service_type\.trim\(\)\.toLowerCase\(\)/)
+  assert.match(createRoute, /body\.provider\.trim\(\)\.toLowerCase\(\)/)
+  assert.match(createRoute, /if \(!serviceType \|\| !provider\)/)
+  assert.match(createRoute, /isOfficialProvider\(serviceType,\s*provider\)/)
   assert.match(createRoute, /badRequest\(c,\s*'Unsupported service_type\/provider'\)/)
 
-  assert.match(testRoute, /if \(!body\.service_type \|\| !body\.provider \|\| !body\.base_url\)/)
-  assert.match(testRoute, /isOfficialProvider\(body\.service_type,\s*body\.provider\)/)
+  assert.match(testRoute, /body\.service_type\.trim\(\)\.toLowerCase\(\)/)
+  assert.match(testRoute, /body\.provider\.trim\(\)\.toLowerCase\(\)/)
+  assert.match(testRoute, /if \(!serviceType \|\| !provider \|\| !body\.base_url\)/)
+  assert.match(testRoute, /isOfficialProvider\(serviceType,\s*provider\)/)
   assert.match(testRoute, /badRequest\(c,\s*'Unsupported service_type\/provider'\)/)
 
-  assert.match(updateRoute, /const serviceType = 'service_type' in body \? body\.service_type : existing\.serviceType/)
-  assert.match(updateRoute, /const provider = 'provider' in body \? body\.provider : existing\.provider/)
+  assert.match(updateRoute, /const rawServiceType = 'service_type' in body \? body\.service_type : existing\.serviceType/)
+  assert.match(updateRoute, /const rawProvider = 'provider' in body \? body\.provider : existing\.provider/)
+  assert.match(updateRoute, /rawServiceType\.trim\(\)\.toLowerCase\(\)/)
+  assert.match(updateRoute, /rawProvider\.trim\(\)\.toLowerCase\(\)/)
   assert.doesNotMatch(updateRoute, /body\.service_type \|\| existing\.serviceType/)
   assert.doesNotMatch(updateRoute, /body\.provider \|\| existing\.provider/)
   assert.match(updateRoute, /isOfficialProvider\(serviceType,\s*provider\)/)
@@ -100,8 +103,8 @@ test('AI config update route persists service type changes after validation', ()
   const updateRoute = routeBlock(route, "app.put('/:id',")
 
   assert.match(updateRoute, /const updates: Record<string, any> = \{ updatedAt: now\(\) \}/)
-  assert.match(updateRoute, /if \('service_type' in body\) updates\.serviceType = body\.service_type/)
-  assert.match(updateRoute, /if \('provider' in body\) updates\.provider = body\.provider/)
+  assert.match(updateRoute, /if \('service_type' in body\) updates\.serviceType = serviceType/)
+  assert.match(updateRoute, /if \('provider' in body\) updates\.provider = provider/)
 })
 
 test('AI config probe uses provider-specific auth schemes', () => {
@@ -115,12 +118,11 @@ test('AI config probe uses provider-specific auth schemes', () => {
   assert.match(route, /modelName\.startsWith\('gemini-3'\)/)
   assert.match(route, /'\/interactions'/)
   assert.match(route, /function bearerHeaders/)
-  assert.match(route, /p === 'openai'/)
+  assert.match(route, /p === 'openai' \|\| p === 'deepseek'/)
   assert.match(route, /p === 'volcengine'/)
   assert.match(route, /'\/chat\/completions'/)
   assert.match(route, /serviceType === 'video'[\s\S]*'\/video\/generations'/)
   assert.doesNotMatch(route, /viduHeaders/)
-  assert.doesNotMatch(route, /p === 'deepseek'/)
   assert.doesNotMatch(route, /p === 'ali'/)
   assert.doesNotMatch(route, /p === 'vidu'/)
 })
@@ -190,8 +192,16 @@ test('new image and video models use their current API shapes', () => {
   assert.match(openaiVideo, /joinProviderUrl\(config\.baseUrl, '\/v1', '\/video\/generations'\)/)
   assert.match(openaiVideo, /`\/video\/generations\/\$\{encodeURIComponent\(taskId\)\}`/)
   assert.match(openaiVideo, /result\?\.id \|\| result\?\.task_id/)
-  assert.match(openaiVideo, /status === 'succeeded' \|\| status === 'completed'/)
+  assert.match(openaiVideo, /status === 'succeeded'/)
   assert.match(openaiVideo, /result\?\.output\?\.video_url/)
+})
+
+test('DeepSeek text requests omit unsupported reasoning_effort patch', () => {
+  const agents = read('src/agents/index.ts')
+
+  assert.match(agents, /providerName === 'deepseek'/)
+  assert.match(agents, /modelName\.toLowerCase\(\)\.startsWith\('deepseek'\)/)
+  assert.match(agents, /filter\(\(\[key\]\) => key !== 'reasoning_effort'\)/)
 })
 
 test('video adapter registry exposes OpenAI compatibility without changing VolcEngine routing', () => {

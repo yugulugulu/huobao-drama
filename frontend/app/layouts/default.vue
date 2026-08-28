@@ -4,13 +4,10 @@
     <header class="header">
       <div class="header-left">
         <button class="brand" @click="navigateTo('/')">
-          <div class="brand-mark">
-            <img v-if="showBrandImage" :src="brandLogo" alt="火宝短剧" class="brand-logo" @error="showBrandImage = false" />
-            <span v-else class="brand-fallback">火</span>
-          </div>
+          <div class="brand-mark" aria-hidden="true"><LayoutGrid :size="17" :stroke-width="2" /></div>
           <div class="brand-text">
-            <span class="brand-name">火宝短剧</span>
-            <span class="brand-sub">Huobao Shorts</span>
+            <span class="brand-name">AI 短剧工作台</span>
+            <span class="brand-sub">AI Drama Studio</span>
           </div>
         </button>
       </div>
@@ -48,11 +45,9 @@
 <script setup>
 import { LayoutGrid, LogOut, Settings, TriangleAlert } from 'lucide-vue-next'
 import { aiConfigAPI } from '~/composables/useApi'
-import brandLogo from '~/assets/huobao-logo.png'
 
 const route = useRoute()
 const { user, logout } = useAuth()
-const showBrandImage = ref(true)
 
 const SERVICE_TYPE_LABELS = { text: '文本', image: '图片', video: '视频' }
 const missingConfigLabels = ref([])
