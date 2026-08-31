@@ -608,21 +608,54 @@
                   <div class="sb-split">
                     <div class="detail-section">
                       <div class="detail-section-head">
-                        <span class="detail-section-title">分镜描述</span>
+                        <div class="detail-section-title-row">
+                          <span class="detail-section-title">分镜描述</span>
+                          <button
+                            type="button"
+                            class="storyboard-expand-btn"
+                            title="放大编辑分镜描述"
+                            aria-label="放大编辑分镜描述"
+                            @click="openStoryboardEditor('description', selectedSb)"
+                          >
+                            <Search :size="13" />
+                          </button>
+                        </div>
                       </div>
                       <label class="field">
                         <span class="field-label">画面描述 <span class="dim">(按【镜头1】【镜头2】…逐子镜头描述；台词写「角色名说：「台词」」，旁白写「旁白：内容」)</span></span>
                         <textarea :value="displayText(selectedSb.description)" class="textarea" rows="8" @blur="updateField(selectedSb, 'description', $event.target.value)" placeholder="分镜画面描述" />
                       </label>
                       <label class="field">
-                        <span class="field-label">氛围</span>
+                        <span class="field-label field-label-with-action">
+                          <span>氛围</span>
+                          <button
+                            type="button"
+                            class="storyboard-expand-btn"
+                            title="放大编辑氛围"
+                            aria-label="放大编辑氛围"
+                            @click="openStoryboardEditor('atmosphere', selectedSb)"
+                          >
+                            <Search :size="13" />
+                          </button>
+                        </span>
                         <textarea :value="displayText(selectedSb.atmosphere)" class="textarea" rows="3" @blur="updateField(selectedSb, 'atmosphere', $event.target.value)" placeholder="光线、色调、空气感、环境氛围" />
                       </label>
                     </div>
 
                     <div class="detail-section">
                       <div class="detail-section-head">
-                        <span class="detail-section-title">视频提示词</span>
+                        <div class="detail-section-title-row">
+                          <span class="detail-section-title">视频提示词</span>
+                          <button
+                            type="button"
+                            class="storyboard-expand-btn"
+                            title="放大编辑视频提示词"
+                            aria-label="放大编辑视频提示词"
+                            @click="openStoryboardEditor('video_prompt', selectedSb)"
+                          >
+                            <Search :size="13" />
+                          </button>
+                        </div>
                         <button
                           type="button"
                           class="btn btn-sm"
@@ -889,7 +922,18 @@
                 <div class="video-inspector-body">
                   <section class="video-inspector-section">
                     <div class="video-inspector-prompt-head">
-                      <span class="video-inspector-label video-inspector-label-hero">视频提示词</span>
+                      <div class="video-inspector-label-row">
+                        <span class="video-inspector-label video-inspector-label-hero">视频提示词</span>
+                        <button
+                          type="button"
+                          class="storyboard-expand-btn"
+                          title="放大编辑视频提示词"
+                          aria-label="放大编辑视频提示词"
+                          @click="openStoryboardEditor('video_prompt', selectedSb)"
+                        >
+                          <Search :size="13" />
+                        </button>
+                      </div>
                       <button
                         type="button"
                         class="btn btn-sm"
@@ -1599,6 +1643,76 @@
         </div>
       </div>
 
+      <div v-if="storyboardEditor.open" class="overlay storyboard-editor-overlay" @click.self="closeStoryboardEditor">
+        <section class="dialog storyboard-editor-dialog" role="dialog" aria-modal="true" :aria-label="`放大编辑${storyboardEditorTitle}`">
+          <header class="dialog-head storyboard-editor-head">
+            <div>
+              <div class="storyboard-editor-kicker">分镜 #{{ storyboardEditor.index }}</div>
+              <h2 class="dialog-title">{{ storyboardEditorTitle }}</h2>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" title="关闭" aria-label="关闭" @click="closeStoryboardEditor">
+              <X :size="14" />
+            </button>
+          </header>
+
+          <div class="dialog-body storyboard-editor-body">
+            <div v-if="storyboardEditor.field === 'duration'" class="storyboard-editor-duration">
+              <label class="field">
+                <span class="field-label">分镜时长</span>
+                <div class="storyboard-editor-duration-input">
+                  <input v-model="storyboardEditorDraft" class="input" type="number" min="1" max="60" step="1" autofocus />
+                  <span class="sb-duration-unit">秒</span>
+                </div>
+                <span class="storyboard-editor-hint">可设置 1–60 秒，保存后会同步到当前分镜。</span>
+              </label>
+            </div>
+
+            <label v-else-if="storyboardEditor.field === 'atmosphere'" class="field storyboard-editor-field">
+              <span class="field-label">氛围描述</span>
+              <textarea
+                v-model="storyboardEditorDraft"
+                class="textarea storyboard-editor-textarea"
+                rows="12"
+                autofocus
+                placeholder="光线、色调、空气感、环境氛围"
+              />
+            </label>
+
+            <label v-else-if="storyboardEditor.field === 'description'" class="field storyboard-editor-field">
+              <span class="field-label">分镜描述</span>
+              <textarea
+                v-model="storyboardEditorDraft"
+                class="textarea storyboard-editor-textarea"
+                rows="16"
+                autofocus
+                placeholder="按【镜头1】【镜头2】…逐子镜头描述；台词写「角色名说：「台词」」，旁白写「旁白：内容」"
+              />
+            </label>
+
+            <div v-else-if="storyboardEditor.field === 'video_prompt'" class="storyboard-editor-field">
+              <span class="field-label">视频提示词</span>
+              <MentionTextarea
+                :model-value="storyboardEditorDraft"
+                :options="mentionOptions"
+                :rows="16"
+                input-class="textarea storyboard-editor-textarea storyboard-editor-mention"
+                placeholder="用 @角色名 / @场景名 / @道具名 引用参考素材，按时间段描述画面运动与镜头…"
+                @update:model-value="storyboardEditorDraft = $event"
+                @commit="storyboardEditorDraft = $event"
+              />
+            </div>
+          </div>
+
+          <footer class="dialog-foot storyboard-editor-foot">
+            <button type="button" class="btn" @click="closeStoryboardEditor">取消</button>
+            <button type="button" class="btn btn-primary" :disabled="storyboardEditor.saving" @click="saveStoryboardEditor">
+              <Loader2 v-if="storyboardEditor.saving" :size="12" class="animate-spin" />
+              保存修改
+            </button>
+          </footer>
+        </section>
+      </div>
+
       <ConfirmDialog
         :open="assetDelete.open"
         :title="`删除${assetDeleteTypeLabel}`"
@@ -1616,7 +1730,7 @@
 import { toast } from 'vue-sonner'
 import {
   Users, Video, FileText, FolderKanban, Clapperboard, Download, Loader2, RotateCcw,
-  MapPin, Play, Plus, X, ListTodo, LogOut, Settings,
+  MapPin, Play, Plus, Search, X, ListTodo, LogOut, Settings,
 } from 'lucide-vue-next'
 import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, aiConfigAPI, uploadAPI } from '~/composables/useApi'
 import { useAgent } from '~/composables/useAgent'
@@ -2084,7 +2198,8 @@ function sceneLightingValue(scene) {
 
 function handleImageViewerKeydown(event) {
   if (event.key !== 'Escape') return
-  if (imageViewer.value.open) closeImageViewer()
+  if (storyboardEditor.value.open) closeStoryboardEditor()
+  else if (imageViewer.value.open) closeImageViewer()
   else if (assetDetail.value.open) closeAssetDetail()
   else if (taskDrawer.value) closeTaskDrawer()
 }
@@ -2652,6 +2767,78 @@ const currentSubStageLabel = computed(() => currentStageLabel.value)
 
 const totalDuration = computed(() => sbs.value.reduce((s, sb) => s + (sb.duration || 10), 0))
 const selectedSb = ref(null)
+const storyboardEditor = ref({ open: false, field: '', target: null, index: 0, saving: false })
+const storyboardEditorDraft = ref('')
+const storyboardEditorTitle = computed(() => ({
+  duration: '分镜时长',
+  description: '分镜描述',
+  atmosphere: '氛围',
+  video_prompt: '视频提示词',
+}[storyboardEditor.value.field] || '分镜内容'))
+
+function openStoryboardEditor(field, sb) {
+  if (!sb || !['description', 'duration', 'atmosphere', 'video_prompt'].includes(field)) return
+  storyboardEditor.value = {
+    open: true,
+    field,
+    target: sb,
+    index: sbs.value.findIndex(item => item.id === sb.id) + 1,
+    saving: false,
+  }
+  storyboardEditorDraft.value = field === 'duration'
+    ? String(sb.duration || 10)
+    : field === 'atmosphere'
+      ? displayText(sb.atmosphere)
+      : field === 'description'
+        ? displayText(sb.description)
+      : (sb.video_prompt || sb.videoPrompt || '')
+}
+
+function closeStoryboardEditor() {
+  if (storyboardEditor.value.saving) return
+  storyboardEditor.value = { open: false, field: '', target: null, index: 0, saving: false }
+  storyboardEditorDraft.value = ''
+}
+
+async function saveStoryboardEditor() {
+  const editor = storyboardEditor.value
+  const sb = editor.target
+  if (!editor.open || !sb?.id || editor.saving) return
+
+  let value = storyboardEditorDraft.value
+  if (editor.field === 'duration') {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) {
+      toast.error('请输入有效的分镜时长')
+      return
+    }
+    value = Math.min(60, Math.max(1, Math.round(parsed)))
+  }
+
+  const oldValue = sb[editor.field] ?? sb[toCamel(editor.field)]
+  if (oldValue === value || (editor.field === 'duration' && Number(oldValue || 10) === value)) {
+    closeStoryboardEditor()
+    return
+  }
+
+  editor.saving = true
+  sb[editor.field] = value
+  const camelField = toCamel(editor.field)
+  if (camelField !== editor.field) sb[camelField] = value
+  try {
+    await storyboardAPI.update(sb.id, { [editor.field]: value })
+    if (editor.field === 'duration' && selectedSb.value?.id === sb.id) videoDuration.value = value
+    toast.success(`${storyboardEditorTitle.value}已保存`)
+    editor.saving = false
+    closeStoryboardEditor()
+  } catch (e) {
+    sb[editor.field] = oldValue
+    if (camelField !== editor.field) sb[camelField] = oldValue
+    toast.error(e.message || '保存失败')
+  } finally {
+    editor.saving = false
+  }
+}
 
 function displayText(value) {
   return typeof value === 'string' && value.trim().toLowerCase() !== 'null' ? value : ''
@@ -4338,6 +4525,39 @@ onMounted(async () => {
   border-bottom: 1px solid var(--border);
   background: var(--surface-soft);
 }
+.sb-field-title-row,
+.detail-section-title-row,
+.video-inspector-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.storyboard-expand-btn {
+  width: 23px;
+  height: 23px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 0.16s var(--ease-out), background 0.16s var(--ease-out), border-color 0.16s var(--ease-out);
+}
+.storyboard-expand-btn:hover {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: var(--accent-glow);
+}
+.storyboard-expand-btn:focus-visible {
+  outline: none;
+  color: var(--accent);
+  box-shadow: 0 0 0 3px var(--button-focus);
+}
 .sb-field-label { font-size: 12px; color: var(--text-3); flex-shrink: 0; }
 .sb-duration-input { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .sb-duration-input .input { width: 56px; height: 30px; padding: 4px 8px; font-size: 12.5px; }
@@ -4380,6 +4600,15 @@ onMounted(async () => {
 .storyboard-editor-scroll .sb-split .detail-section-copy {
   margin-top: -4px;
 }
+.field-label-with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.field-label-with-action > span {
+  min-width: 0;
+}
 /* 双栏内字段撑满面板高度 */
 .storyboard-editor-scroll .sb-split .field { flex: 1; min-height: 0; }
 .storyboard-editor-scroll .sb-split .field .textarea { flex: 1; min-height: 64px; resize: vertical; }
@@ -4387,6 +4616,76 @@ onMounted(async () => {
 .storyboard-editor-scroll .sb-split .mention-textarea {
   flex: 1;
   min-height: 0;
+}
+.storyboard-editor-overlay {
+  z-index: 125;
+  padding: 24px;
+}
+.storyboard-editor-dialog {
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(720px, calc(100vh - 48px));
+}
+.storyboard-editor-head {
+  justify-content: space-between;
+  padding: 16px 20px 14px;
+}
+.storyboard-editor-kicker {
+  margin-bottom: 4px;
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.storyboard-editor-body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+}
+.storyboard-editor-field {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+.storyboard-editor-textarea {
+  width: 100%;
+  min-height: 300px;
+  resize: vertical;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.storyboard-editor-mention {
+  min-height: 360px;
+}
+.storyboard-editor-duration {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+}
+.storyboard-editor-duration-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 180px;
+}
+.storyboard-editor-duration-input .input {
+  width: 130px;
+  height: 42px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.storyboard-editor-hint {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.storyboard-editor-foot {
+  padding: 12px 20px 16px;
 }
 @media (max-width: 1200px) {
   .storyboard-editor-scroll .sb-split { grid-template-columns: 1fr; }
