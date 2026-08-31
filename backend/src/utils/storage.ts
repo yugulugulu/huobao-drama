@@ -87,7 +87,8 @@ export function isManagedStorageReference(reference: string): boolean {
 export async function downloadFile(url: string, userId: number, subDir: string): Promise<string> {
   const response = await fetch(url)
   if (!response.ok) throw new Error(`Download failed: ${response.status}`)
-  const ext = getExtFromUrl(url)
+  // 优先沿用 URL 扩展名；签名地址不带扩展名时，再根据响应类型补全后缀。
+  const ext = getExtFromUrl(url) || getExtFromContentType(response.headers.get('content-type'))
   const key = buildObjectKey(userId, subDir, `remote${ext}`)
   return putBuffer(key, Buffer.from(await response.arrayBuffer()))
 }
@@ -120,7 +121,21 @@ function getExtFromUrl(url: string): string {
     const ext = path.extname(new URL(url).pathname)
     if (ext && ext.length <= 8) return ext
   } catch {}
-  return '.bin'
+  return ''
+}
+
+function getExtFromContentType(contentType: string | null): string {
+  const mimeType = String(contentType || '').split(';', 1)[0].trim().toLowerCase()
+  return ({
+    'video/mp4': '.mp4',
+    'video/webm': '.webm',
+    'video/quicktime': '.mov',
+    'video/x-m4v': '.m4v',
+    'image/png': '.png',
+    'image/jpeg': '.jpg',
+    'image/webp': '.webp',
+    'image/gif': '.gif',
+  } as Record<string, string>)[mimeType] || '.bin'
 }
 
 /** 仅供本地驱动的静态文件服务使用；OSS 引用应通过 readStorageBuffer/materializeStorageFile 读取。 */

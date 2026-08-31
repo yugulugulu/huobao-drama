@@ -7,6 +7,7 @@ import { and, eq } from 'drizzle-orm'
 import { getActiveConfig, getActiveConfigForProvider, getConfigById } from './ai.js'
 import { now } from '../utils/response.js'
 import { downloadFile, generateImageThumb, readImageAsCompressedDataUrl, saveBase64Image } from '../utils/storage.js'
+import { extractVideoPoster } from '../utils/video-poster.js'
 import { getImageAdapter, getVideoAdapter } from './adapters/registry'
 import type { AIConfig } from './adapters/types'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
@@ -492,15 +493,20 @@ async function writeBackImageAssets(record: SysTaskRecord, localPath: string) {
 }
 
 async function handleVideoComplete(record: SysTaskRecord, videoUrl: string, duration: number | null | undefined) {
+  // 上游地址通常有有效期，完成后立即下载到当前用户的存储目录，避免任务依赖上游临时资源。
+  const localPath = await downloadFile(videoUrl, record.userId, 'videos')
+  // 海报帧也使用应用管理的资源引用；提取失败不阻断视频主流程。
+  await extractVideoPoster(localPath)
+
   await db.update(schema.sysTask)
-    .set({ resultUrl: videoUrl, localPath: null, status: 'completed', completedAt: now(), updatedAt: now() })
+    .set({ resultUrl: localPath, localPath, status: 'completed', completedAt: now(), updatedAt: now() })
     .where(and(eq(schema.sysTask.id, record.id), eq(schema.sysTask.userId, record.userId)))
 
-  logTaskSuccess('VideoTask', 'linked', { id: record.id, videoUrl, storyboardId: record.storyboardId, duration })
+  logTaskSuccess('VideoTask', 'downloaded', { id: record.id, provider: record.provider, localPath, storyboardId: record.storyboardId, duration })
 
   if (record.storyboardId) {
     await db.update(schema.storyboards)
-      .set({ videoUrl, duration: duration || undefined, updatedAt: now() })
+      .set({ videoUrl: localPath, duration: duration || undefined, updatedAt: now() })
       .where(and(eq(schema.storyboards.id, record.storyboardId), eq(schema.storyboards.userId, record.userId)))
   }
 }
