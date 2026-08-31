@@ -967,8 +967,57 @@
                     <div class="video-param-row">
                       <span class="video-param-name">生成时长</span>
                       <span class="video-param-control">
-                        <input v-model.number="videoDuration" type="number" min="4" max="15" class="input video-duration-input" />
-                        <span class="video-param-unit">s（4-15）</span>
+                        <input
+                          v-model.number="videoDuration"
+                          type="range"
+                          min="4"
+                          max="15"
+                          step="1"
+                          class="video-duration-range"
+                          :style="{ '--duration-progress': `${((videoDuration - 4) / 11) * 100}%` }"
+                          aria-label="生成时长"
+                        />
+                        <strong class="video-duration-value">{{ videoDuration }}s</strong>
+                        <span class="video-param-unit">（4-15s）</span>
+                      </span>
+                    </div>
+                    <div class="video-param-row">
+                      <span class="video-param-name">视频分辨率</span>
+                      <span class="video-param-control">
+                        <div class="video-resolution-options" role="group" aria-label="视频分辨率">
+                          <button
+                            v-for="option in resolutionOptions"
+                            :key="option.value"
+                            type="button"
+                            class="video-resolution-option"
+                            :class="{ selected: episodeResolution === option.value }"
+                            :aria-pressed="episodeResolution === option.value"
+                            :title="`选择${option.label}分辨率`"
+                            @click="setEpisodeResolution(option.value)"
+                          >
+                            {{ option.label }}
+                          </button>
+                        </div>
+                      </span>
+                    </div>
+                    <div class="video-param-row">
+                      <span class="video-param-name">画面比例</span>
+                      <span class="video-param-control">
+                        <div class="video-aspect-ratio-options" role="group" aria-label="视频画面比例">
+                          <button
+                            v-for="option in aspectRatioOptions"
+                            :key="option.value"
+                            type="button"
+                            class="video-aspect-ratio-option"
+                            :class="{ selected: videoAspectRatio === option.value }"
+                            :aria-pressed="videoAspectRatio === option.value"
+                            :title="`选择${option.label}（${option.description}）`"
+                            @click="setVideoAspectRatio(option.value)"
+                          >
+                            <span>{{ option.label }}</span>
+                            <small>{{ option.description }}</small>
+                          </button>
+                        </div>
                       </span>
                     </div>
                   </section>
@@ -1662,6 +1711,51 @@ function readStoredModel(key, legacyKey = '') {
 const chatModel = ref(readStoredModel(MODEL_STORE_KEYS.chat, 'studio:model:rewrite'))
 const imageModel = ref(readStoredModel(MODEL_STORE_KEYS.image))
 const videoModel = ref(readStoredModel(MODEL_STORE_KEYS.video))
+
+// 视频分辨率：只允许修改当前项目支持的三档分辨率，并持久化到当前集
+const resolutionOptions = [
+  { label: '720p', value: '720p' },
+  { label: '1080p', value: '1080p' },
+  { label: '4k', value: '4k' },
+]
+// 视频画面比例：沿用项目创建时的比例选项，当前项目比例默认高亮
+const aspectRatioOptions = [
+  { label: '16:9', description: '横屏', value: '16:9' },
+  { label: '9:16', description: '竖屏', value: '9:16' },
+  { label: '1:1', description: '方形', value: '1:1' },
+]
+const episodeResolution = computed(() => {
+  const value = episode.value?.resolution
+  return resolutionOptions.some(option => option.value === value) ? value : '720p'
+})
+
+async function setEpisodeResolution(resolution) {
+  if (!epId.value || episodeResolution.value === resolution) return
+  const previous = episode.value?.resolution
+  episode.value.resolution = resolution
+  try {
+    await episodeAPI.update(epId.value, { resolution })
+    toast.success(`本集视频分辨率已切换为 ${resolution}`)
+  } catch (e) {
+    episode.value.resolution = previous
+    toast.error(e.message)
+  }
+}
+
+// 视频画面比例默认跟随项目预设，用户在当前生成页切换时只覆盖本页生成参数，不修改项目设置
+const projectAspectRatio = computed(() => {
+  const value = drama.value?.aspect_ratio || drama.value?.aspectRatio
+  return aspectRatioOptions.some(option => option.value === value) ? value : '16:9'
+})
+const videoAspectRatio = ref('16:9')
+watch(projectAspectRatio, value => { videoAspectRatio.value = value }, { immediate: true })
+
+function setVideoAspectRatio(aspectRatio) {
+  if (aspectRatioOptions.some(option => option.value === aspectRatio)) {
+    videoAspectRatio.value = aspectRatio
+  }
+}
+
 function persistModel(modelRef, key) {
   watch(modelRef, v => {
     try { v ? localStorage.setItem(key, v) : localStorage.removeItem(key) } catch {}
@@ -2068,8 +2162,6 @@ const lockedImageConfigId = computed(() => episode.value?.image_config_id || epi
 const lockedVideoConfigId = computed(() => episode.value?.video_config_id || episode.value?.videoConfigId || null)
 const lockedImageConfigLabel = computed(() => configLabel(imageConfigs.value.find(c => c.id === lockedImageConfigId.value)))
 const lockedVideoConfigLabel = computed(() => configLabel(videoConfigs.value.find(c => c.id === lockedVideoConfigId.value)))
-// 画面比例在创建项目时固定，视频生成统一使用
-const dramaAspectRatio = computed(() => drama.value?.aspect_ratio || drama.value?.aspectRatio || '16:9')
 
 // 生成可选模型列表：配置中的模型数组（首位为配置默认）；API 可能返回数组或 JSON 字符串
 function configModels(cfg) {
@@ -3425,7 +3517,7 @@ async function genVid(sb) {
     drama_id: dramaId,
     prompt: resolveVideoPromptRefs(sb),
     duration: Number(videoDuration.value || sb.duration || 10),
-    aspect_ratio: dramaAspectRatio.value,
+    aspect_ratio: videoAspectRatio.value,
     generate_audio: true,
     model: videoModel.value || undefined,
     config_id: ownerConfigId(videoModelOptions.value, videoModel.value),
@@ -4619,6 +4711,104 @@ onMounted(async () => {
 /* Production content */
 .prod-content { flex: 1; overflow-y: auto; padding: 10px 12px 64px; display: flex; flex-direction: column; gap: 10px; }
 .prod-section-bar { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.video-resolution-options {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px;
+  border: 1px solid var(--surface-outline);
+  border-radius: 9px;
+  background: var(--surface-muted);
+}
+.video-resolution-option {
+  min-width: 58px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #f2cf5b;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font: 650 11px/1 var(--font-mono);
+  cursor: pointer;
+  transition: all 0.18s var(--ease-out);
+}
+.video-resolution-option:hover,
+.video-resolution-option:focus-visible,
+.video-resolution-option.selected {
+  outline: none;
+  background: #fff7d6;
+  color: #7a5a00;
+  box-shadow: 0 1px 4px rgba(154, 114, 0, 0.12);
+}
+.video-aspect-ratio-options {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid var(--surface-outline);
+  border-radius: 9px;
+  background: var(--surface-muted);
+}
+.video-aspect-ratio-option {
+  min-width: 56px;
+  min-height: 36px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font: 650 11px/1 var(--font-mono);
+  white-space: nowrap;
+  transition: all 0.18s var(--ease-out);
+}
+.video-aspect-ratio-option small { color: var(--text-3); font: 500 9px/1 var(--font-body); }
+.video-aspect-ratio-option:hover,
+.video-aspect-ratio-option:focus-visible,
+.video-aspect-ratio-option.selected {
+  outline: none;
+  background: #fff7d6;
+  color: #7a5a00;
+  box-shadow: 0 1px 4px rgba(154, 114, 0, 0.12);
+}
+.video-aspect-ratio-option.selected small,
+.video-aspect-ratio-option:hover small { color: #9b7600; }
+
+.video-duration-range {
+  width: 116px;
+  height: 6px;
+  margin: 0;
+  appearance: none;
+  border-radius: 999px;
+  background: linear-gradient(to right, #f0b429 0 var(--duration-progress), #e8e8ed var(--duration-progress) 100%);
+  cursor: pointer;
+}
+.video-duration-range::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  appearance: none;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #e09b00;
+  box-shadow: 0 1px 4px rgba(121, 82, 0, 0.28);
+}
+.video-duration-range::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #e09b00;
+  box-shadow: 0 1px 4px rgba(121, 82, 0, 0.28);
+}
+.video-duration-range:focus-visible { outline: 3px solid rgba(234, 179, 8, 0.2); outline-offset: 3px; }
+.video-duration-value { min-width: 28px; color: #7a5a00; font: 700 12px/1 var(--font-mono); }
 
 /* 资产栏动作：提取（虚线中性）与批量生成（强调色）视觉分组 */
 .asset-bar-actions { align-items: center; }
@@ -5516,7 +5706,6 @@ onMounted(async () => {
 .video-param-value { color: var(--text-1); text-align: right; font-size: 11px; }
 .video-param-control { display: inline-flex; align-items: center; gap: 6px; }
 .video-param-unit { font-size: 11px; color: var(--text-3); }
-.video-duration-input { width: 64px; padding: 4px 8px; font-size: 12px; }
 
 /* Prod grid */
 .prod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
