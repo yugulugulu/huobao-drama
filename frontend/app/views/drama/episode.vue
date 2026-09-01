@@ -3174,7 +3174,8 @@ function stopStoryboardBreakdownPolling() {
   storyboardBreakdownPollTimer = null
 }
 
-async function pollStoryboardBreakdown(attempts = 180) {
+// 前端轮询时长略高于后端 10 分钟超时，确保能拿到最终失败状态。
+async function pollStoryboardBreakdown(attempts = 360) {
   const tick = async (left) => {
     try {
       const task = await episodeAPI.breakStoryboardStatus(epId.value)
