@@ -11,9 +11,13 @@
       :placeholder="placeholder"
       :value="text"
       @input="onInput"
+      @compositionend="onCompositionEnd"
       @keydown="onKeydown"
       @blur="onBlur"
-      @click="closeMention"
+      @click="onCaretChange"
+      @keyup="onCaretChange"
+      @focus="onCaretChange"
+      @select="onCaretChange"
       @scroll="onScroll"
     />
     <Teleport to="body">
@@ -26,7 +30,7 @@
               :key="group.group + '-' + opt.value"
               type="button"
               :class="['mention-option', { highlighted: flatIndex(gi, oi) === highlightIdx }]"
-              @mousedown.prevent="pick(opt)"
+              @pointerdown.prevent="pick(opt)"
               @mousemove="highlightIdx = flatIndex(gi, oi)"
             >
               <span :class="['mention-avatar', `mention-avatar-${opt.group === '场景' ? 'scene' : (opt.group === '道具' ? 'prop' : 'role')}`]">
@@ -95,8 +99,11 @@ onBeforeUnmount(() => {
 })
 
 watch(() => props.modelValue, (v) => {
-  if (v !== text.value) text.value = v
-  mention.value.open = false
+  // 本地输入通过 update:modelValue 回传时，值与 text 相同，不应关闭当前 @ 候选面板。
+  if (v !== text.value) {
+    text.value = v
+    mention.value.open = false
+  }
 })
 
 // 可引用名（按长度降序，保证最长匹配优先）及其分组样式
@@ -226,7 +233,7 @@ function getCaretCoordinates(textarea, position) {
 
 function updateMentionState() {
   const active = activeMention()
-  if (!active) { mention.value.open = false; return }
+  if (!active || !props.options.length) { mention.value.open = false; return }
   // @后文本已精确等于某个完整引用名时不再弹列表（如删除引用尾部空格后光标落在完整引用上）
   if (mentionNames.value.some(([name]) => name === active.query)) {
     mention.value.open = false
@@ -270,7 +277,20 @@ function setText(next, caret) {
 function onInput(e) {
   text.value = e.target.value
   emit('update:modelValue', e.target.value)
+  // 父组件双向同步会触发一次重渲染，输入事件后同时在当前更新周期和下一帧重算，避免 @ 候选被漏掉。
   updateMentionState()
+  nextTick(() => {
+    updateMentionState()
+    requestAnimationFrame(updateMentionState)
+  })
+}
+
+function onCompositionEnd() {
+  nextTick(updateMentionState)
+}
+
+function onCaretChange() {
+  nextTick(updateMentionState)
 }
 
 function onScroll() {
@@ -278,7 +298,9 @@ function onScroll() {
     backdropEl.value.scrollTop = taEl.value.scrollTop
     backdropEl.value.scrollLeft = taEl.value.scrollLeft
   }
-  closeMention()
+  // 文本域滚动可能由输入或光标移动触发，不能无条件关闭 @ 候选；保持候选并重新计算光标位置。
+  if (activeMention()) nextTick(updateMentionState)
+  else closeMention()
 }
 
 function onKeydown(e) {
@@ -324,8 +346,11 @@ function pick(opt) {
 }
 
 function onBlur(e) {
-  closeMention()
   emit('commit', e.target.value)
+  // 下拉候选挂载在 body 中，点击候选时 textarea 会先失焦；延迟关闭，避免候选项还没触发就消失。
+  window.setTimeout(() => {
+    if (!dropdownEl.value?.matches(':hover')) closeMention()
+  }, 0)
 }
 </script>
 
@@ -384,7 +409,7 @@ function onBlur(e) {
 }
 .mention-dropdown {
   position: fixed;
-  z-index: 1000;
+  z-index: 10000;
   width: 240px;
   max-height: 220px;
   overflow-y: auto;

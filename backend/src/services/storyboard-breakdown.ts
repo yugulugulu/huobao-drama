@@ -16,7 +16,8 @@ export interface StoryboardBreakdownStatus {
   result_count: number
 }
 
-const TASK_TIMEOUT_MS = 5 * 60 * 1000
+// 分镜拆分允许模型进行多轮分析和工具调用，最长处理时间为 10 分钟。
+const TASK_TIMEOUT_MS = 10 * 60 * 1000
 const tasks = new Map<string, StoryboardBreakdownStatus>()
 const keyOf = (userId: number, episodeId: number) => `${userId}:${episodeId}`
 
