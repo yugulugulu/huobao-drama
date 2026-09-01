@@ -1118,8 +1118,8 @@
                   <div class="merge-card-thumb">
                     <video
                       v-if="m.status === 'completed' && m.merged_url"
-                      :src="'/' + m.merged_url"
-                      :poster="posterOf('/' + m.merged_url) || undefined"
+                      :src="mediaSrc(m.merged_url)"
+                      :poster="posterOf(mediaSrc(m.merged_url)) || undefined"
                       preload="none"
                       muted
                       playsinline
@@ -1137,7 +1137,7 @@
                     <span v-if="m.duration">· {{ m.duration }}s</span>
                     <a
                       v-if="m.status === 'completed' && m.merged_url"
-                      :href="'/' + m.merged_url"
+                      :href="mediaSrc(m.merged_url)"
                       download
                       class="btn btn-sm"
                       @click.stop
@@ -1585,7 +1585,7 @@
           <div class="image-viewer-head">
             <div class="image-viewer-title">成片预览</div>
             <span class="dim" style="font-size:11px">{{ formatHistoryTime(activeMerge.created_at) }}<template v-if="activeMerge.duration"> · {{ activeMerge.duration }}s</template></span>
-            <a :href="'/' + activeMerge.merged_url" download class="btn btn-sm" style="margin-left:auto">
+            <a :href="mediaSrc(activeMerge.merged_url)" download class="btn btn-sm" style="margin-left:auto">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               下载成片
             </a>
@@ -1596,7 +1596,7 @@
           <div class="merge-viewer-body">
             <video
               :key="activeMerge.id"
-              :src="'/' + activeMerge.merged_url"
+              :src="mediaSrc(activeMerge.merged_url)"
               controls
               autoplay
               playsinline
