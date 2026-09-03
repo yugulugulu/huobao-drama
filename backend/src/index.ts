@@ -20,6 +20,7 @@ import agent from './routes/agent.js'
 import merge from './routes/merge.js'
 import skills from './routes/skills.js'
 import props from './routes/props.js'
+import audios from './routes/audios.js'
 import auth from './routes/auth.js'
 import { authRequired } from './middleware/auth.js'
 import { localStorageRoot, storageDriver, validateEnvironment } from './config/env.js'
@@ -63,6 +64,7 @@ api.route('/agent', agent)
 api.route('/merge', merge)
 api.route('/skills', skills)
 api.route('/props', props)
+api.route('/audios', audios)
 
 app.route('/api/v1', api)
 

@@ -56,6 +56,7 @@ export const episodeAPI = {
   characters: (id: number) => api.get(`/episodes/${id}/characters`),
   scenes: (id: number) => api.get(`/episodes/${id}/scenes`),
   props: (id: number) => api.get(`/episodes/${id}/props`),
+  audios: (id: number) => api.get(`/episodes/${id}/audios`),
   storyboards: (id: number) => api.get(`/episodes/${id}/storyboards`),
   pipelineStatus: (id: number) => api.get(`/episodes/${id}/pipeline-status`),
   extract: (id: number, target: string, model?: string, configId?: number) => api.post(`/episodes/${id}/extract`, { target, model: model || undefined, config_id: configId || undefined }),
@@ -137,6 +138,13 @@ export const uploadAPI = {
   image: (f: File) => uploadReq<{ url: string; path: string }>('/upload/image', f),
   video: (f: File) => uploadReq<{ url: string; path: string }>('/upload/video', f),
   audio: (f: File) => uploadReq<{ url: string; path: string }>('/upload/audio', f),
+}
+export const audioAPI = {
+  list: (dramaId: number) => api.get(`/audios?drama_id=${dramaId}`),
+  create: (data: any) => api.post('/audios', data),
+  update: (id: number, data: any) => api.put(`/audios/${id}`, data),
+  upload: (id: number, file: File) => uploadReq(`/audios/${id}/upload`, file),
+  del: (id: number) => api.del(`/audios/${id}`),
 }
 export const mergeAPI = {
   merge: (epId: number, storyboardIds?: number[]) => api.post(`/merge/episodes/${epId}/merge`, storyboardIds?.length ? { storyboard_ids: storyboardIds } : {}),

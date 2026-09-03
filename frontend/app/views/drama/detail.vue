@@ -173,23 +173,24 @@
       </div>
 
       <!-- 全部素材为空 -->
-      <div v-if="!materials.length" class="empty-state">
+      <div v-if="!materials.length && !audios.length" class="empty-state">
         <div class="empty-icon">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
           </svg>
         </div>
         <p class="empty-title">还没有任何素材</p>
-        <p class="empty-desc">在剧情工作台中通过「提取资产」生成角色、场景与道具后，会自动收录到这里，并可直接生成素材图。</p>
+        <p class="empty-desc">在剧情工作台中通过「提取资产」生成角色、场景与道具后，会自动收录到这里，也可以新增音频素材。</p>
       </div>
 
-      <div v-else-if="materials.length" class="asset-groups">
+      <div v-else-if="materials.length || audios.length" class="asset-groups">
         <template v-for="g in assetGroups" :key="g.kindKey">
           <template v-if="g.items.length">
             <div v-if="assetTab === 'all'" class="asset-group-head" :class="tagClass(g.kindKey)">
               <span class="group-icon">
                 <svg v-if="g.kindKey === 'character'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 <svg v-else-if="g.kindKey === 'scene'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                <Music v-else-if="g.kindKey === 'audio'" :size="15" />
                 <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="M3.27 6.96 12 12l8.73-5.04M12 22.08V12"/></svg>
               </span>
               <span class="group-label">{{ g.label }}</span>
@@ -247,6 +248,50 @@
                   </div>
                 </div>
               </article>
+            </div>
+
+            <!-- 音频：独立的播放器卡片，不参与图片生成流程 -->
+            <div v-else-if="g.kindKey === 'audio'" class="asset-grid audio-asset-grid">
+              <article
+                v-for="audio in g.items"
+                :key="`audio-${audio.id}`"
+                class="card asset-card audio-asset-card"
+                :class="{ 'is-ready': audioHasFile(audio) }"
+              >
+                <div class="audio-card-cover" :class="{ ready: audioHasFile(audio) }">
+                  <div class="audio-wave" aria-hidden="true">
+                    <span v-for="bar in 16" :key="bar"></span>
+                  </div>
+                  <Music :size="22" class="audio-cover-icon" />
+                  <span class="audio-cover-status">{{ audioHasFile(audio) ? '已上传' : '待上传' }}</span>
+                </div>
+                <div class="audio-card-body">
+                  <div class="audio-title-row">
+                    <span class="asset-name" :title="audio.name">{{ audio.name }}</span>
+                    <span class="audio-kind-tag">音频</span>
+                  </div>
+                  <div class="asset-meta asset-desc dim" :title="audio.description || ''">{{ audio.description || '暂无描述' }}</div>
+                  <audio v-if="audioHasFile(audio)" :src="audioFileUrl(audio)" controls preload="metadata" class="audio-player" />
+                  <button v-else type="button" class="audio-upload-empty" @click.stop="uploadAudioAsset(audio)">
+                    <Upload :size="14" />
+                    点击上传音频文件
+                  </button>
+                </div>
+                <div class="asset-foot audio-asset-foot">
+                  <span :class="['dot', audioHasFile(audio) && 'ok']" />
+                  <span class="audio-foot-hint">{{ audioHasFile(audio) ? '可播放' : '未上传文件' }}</span>
+                  <button class="btn btn-sm" type="button" :disabled="isAudioUploading(audio)" @click.stop="uploadAudioAsset(audio)">
+                    <span v-if="isAudioUploading(audio)" class="ring-spinner sm"></span>
+                    <Upload v-else :size="11" />
+                    {{ audioHasFile(audio) ? '重新上传' : '上传音频' }}
+                  </button>
+                  <button class="btn btn-sm btn-danger-text" type="button" @click.stop="deleteAudioAsset(audio)">删除</button>
+                </div>
+              </article>
+              <button type="button" class="card audio-add-card" @click="openAudioCreate">
+                <Plus :size="16" />
+                <span>新增音频</span>
+              </button>
             </div>
 
             <!-- 场景 / 道具：竖向布局卡片（封面 + 描述/光影/类型 + 最终提示词 + 底部状态） -->
@@ -315,6 +360,36 @@
           </div>
           <p class="empty-title">暂无{{ tabLabel(assetTab) }}素材</p>
           <p class="empty-desc">在剧情工作台中提取并生成{{ tabLabel(assetTab) }}后，会显示在这里。</p>
+        </div>
+      </div>
+
+      <!-- 音频元数据创建：先确认名称和描述，再上传文件 -->
+      <div v-if="audioCreate.open" class="overlay" @click.self="audioCreate.open = false">
+        <div class="dialog asset-create-dialog audio-create-dialog">
+          <header class="dialog-head">
+            <h2 class="dialog-title">新增音频</h2>
+            <button class="btn btn-ghost btn-icon" title="关闭" @click="audioCreate.open = false">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </header>
+          <div class="dialog-body asset-create-body">
+            <div class="audio-create-hero">
+              <div class="audio-create-icon"><Music :size="20" /></div>
+              <div class="audio-create-copy">
+                <strong>创建音频资产</strong>
+                <span>先填写名称和描述，确认后再上传音频文件。</span>
+              </div>
+            </div>
+            <label class="field"><span class="field-label">音频名称</span><input v-model="audioCreate.name" class="input" placeholder="例如：苏照棠的环境音" /></label>
+            <label class="field"><span class="field-label">描述 <span class="dim">（可选）</span></span><textarea v-model="audioCreate.description" class="textarea" rows="4" placeholder="描述音频氛围、用途或角色信息" /></label>
+          </div>
+          <footer class="dialog-foot">
+            <button class="btn" @click="audioCreate.open = false">取消</button>
+            <button class="btn btn-primary" :disabled="audioCreate.saving" @click="saveAudioCreate">
+              <Loader2 v-if="audioCreate.saving" :size="12" class="animate-spin" />
+              确认新增
+            </button>
+          </footer>
         </div>
       </div>
 
@@ -551,7 +626,8 @@
 
 <script setup>
 import { toast } from 'vue-sonner'
-import { dramaAPI, episodeAPI, characterAPI, sceneAPI, propAPI, taskAPI, uploadAPI } from '~/composables/useApi'
+import { Music, Upload, Plus, Loader2 } from 'lucide-vue-next'
+import { dramaAPI, episodeAPI, characterAPI, sceneAPI, propAPI, taskAPI, uploadAPI, audioAPI } from '~/composables/useApi'
 import BaseSelect from '~/components/BaseSelect.vue'
 
 const route = useRoute()
@@ -630,6 +706,11 @@ async function load() {
   } catch (e) {
     toast.error(e.message)
   }
+  try {
+    audios.value = await audioAPI.list(dramaId) || []
+  } catch {
+    audios.value = []
+  }
 }
 
 function openAddEpisode() {
@@ -679,6 +760,9 @@ const assetTab = ref('all')
 const assetViewer = ref({ open: false, src: '', title: '' })
 const pendingMaterials = ref(new Set())
 const imageTasks = ref([])
+const audios = ref([])
+const uploadingAudioIds = ref([])
+const audioCreate = ref({ open: false, name: '', description: '', saving: false })
 const {
   pendingCharImageIds,
   pendingSceneImageIds,
@@ -692,8 +776,9 @@ const assetTabs = [
   { label: '角色', value: 'character' },
   { label: '场景', value: 'scene' },
   { label: '道具', value: 'prop' },
+  { label: '音频', value: 'audio' },
 ]
-const KIND_ORDER = { character: 0, scene: 1, prop: 2 }
+const KIND_ORDER = { character: 0, scene: 1, prop: 2, audio: 3 }
 
 // 素材库以 characters / scenes / props 三张资产表为源（后端生图会写回其 imageUrl）
 function matImage(m) { return m.image_url || m.imageUrl || m.localPath || m.local_path || '' }
@@ -710,7 +795,7 @@ function matDesc(m) {
   return m.description || ''
 }
 function tagClass(kindKey) {
-  return kindKey === 'character' ? 'is-character' : kindKey === 'scene' ? 'is-scene' : 'is-prop'
+  return kindKey === 'character' ? 'is-character' : kindKey === 'scene' ? 'is-scene' : kindKey === 'prop' ? 'is-prop' : 'is-audio'
 }
 function tabLabel(v) { return assetTabs.find(t => t.value === v)?.label || '' }
 
@@ -721,6 +806,7 @@ const materials = computed(() => {
   for (const c of d.characters || []) list.push({ ...c, kind: '角色', kindKey: 'character' })
   for (const s of d.scenes || []) list.push({ ...s, kind: '场景', kindKey: 'scene' })
   for (const p of d.props || []) list.push({ ...p, kind: '道具', kindKey: 'prop' })
+  for (const a of audios.value || []) list.push({ ...a, kind: '音频', kindKey: 'audio' })
   return list.sort((a, b) => (KIND_ORDER[a.kindKey] - KIND_ORDER[b.kindKey]) || (a.id - b.id))
 })
 const visibleAssets = computed(() =>
@@ -733,6 +819,7 @@ const assetGroups = computed(() => {
     { kindKey: 'character', label: '角色', items: materials.value.filter(m => m.kindKey === 'character') },
     { kindKey: 'scene', label: '场景', items: materials.value.filter(m => m.kindKey === 'scene') },
     { kindKey: 'prop', label: '道具', items: materials.value.filter(m => m.kindKey === 'prop') },
+    { kindKey: 'audio', label: '音频', items: materials.value.filter(m => m.kindKey === 'audio') },
   ]
   return assetTab.value === 'all'
     ? groups
@@ -741,16 +828,19 @@ const assetGroups = computed(() => {
 
 function pendingKey(m) { return `${m.kindKey}:${m.id}` }
 function pendingIdsFor(kindKey) {
+  if (kindKey === 'audio') return null
   if (kindKey === 'character') return pendingCharImageIds
   if (kindKey === 'scene') return pendingSceneImageIds
   return pendingPropImageIds
 }
 function taskTargetId(task, kindKey) {
+  if (kindKey === 'audio') return undefined
   if (kindKey === 'character') return task.characterId ?? task.character_id
   if (kindKey === 'scene') return task.sceneId ?? task.scene_id
   return task.propId ?? task.prop_id
 }
 function hasProcessingImageTask(m) {
+  if (m.kindKey === 'audio') return false
   return imageTasks.value.some(task =>
     isAssetImageTask(task) && task.status === 'processing' &&
     Number(taskTargetId(task, m.kindKey)) === Number(m.id)
@@ -764,21 +854,24 @@ function isAssetImageTask(task) {
   )
 }
 function isPending(m) {
+  if (m.kindKey === 'audio') return false
   return pendingMaterials.value.has(pendingKey(m)) ||
-    pendingIdsFor(m.kindKey).value.includes(m.id) ||
+    pendingIdsFor(m.kindKey)?.value.includes(m.id) ||
     hasProcessingImageTask(m)
 }
 
 function markPending(m) {
+  if (m.kindKey === 'audio') return
   const ids = pendingIdsFor(m.kindKey)
-  if (!ids.value.includes(m.id)) ids.value.push(m.id)
+  if (ids && !ids.value.includes(m.id)) ids.value.push(m.id)
 }
 
 function clearPending(m) {
+  if (m.kindKey === 'audio') return
   const key = pendingKey(m)
   pendingMaterials.value = new Set([...pendingMaterials.value].filter(item => item !== key))
   const ids = pendingIdsFor(m.kindKey)
-  ids.value = ids.value.filter(id => id !== m.id)
+  if (ids) ids.value = ids.value.filter(id => id !== m.id)
 }
 
 async function loadImageTasks() {
@@ -788,6 +881,7 @@ async function loadImageTasks() {
 }
 
 function shouldKeepMaterialPending(material) {
+  if (material.kindKey === 'audio') return false
   const tasks = imageTasks.value.filter(task =>
     isAssetImageTask(task) &&
     Number(taskTargetId(task, material.kindKey)) === Number(material.id)
@@ -843,6 +937,7 @@ watch([activeImageTaskCount, localPendingMaterialCount], ([active, localPending]
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 async function generateMaterial(m) {
+  if (m.kindKey === 'audio') return
   const epId = drama.value?.episodes?.[0]?.id
   if (!epId) { toast.error('请先在「剧集列表」创建至少一集，才能生成素材图'); return }
   const key = pendingKey(m)
@@ -898,6 +993,80 @@ function uploadMaterial(m) {
     }
   }
   input.click()
+}
+
+/* ===== 音频资产 ===== */
+function audioFileUrl(audio) {
+  const raw = audio?.file_url || audio?.fileUrl || audio?.local_path || audio?.localPath || ''
+  if (!raw) return ''
+  return /^https?:\/\//i.test(raw) || raw.startsWith('/') ? raw : `/${raw}`
+}
+function audioHasFile(audio) {
+  return !!audioFileUrl(audio)
+}
+
+function openAudioCreate() {
+  audioCreate.value = { open: true, name: '', description: '', saving: false }
+}
+
+async function saveAudioCreate() {
+  if (audioCreate.value.saving) return
+  if (!String(audioCreate.value.name || '').trim()) {
+    toast.warning('请填写音频名称')
+    return
+  }
+  audioCreate.value.saving = true
+  try {
+    await audioAPI.create({
+      drama_id: dramaId,
+      name: String(audioCreate.value.name).trim(),
+      description: audioCreate.value.description?.trim() || undefined,
+    })
+    toast.success('音频已新增，请上传文件')
+    audioCreate.value.open = false
+    await load()
+  } catch (e) {
+    toast.error(e.message)
+  } finally {
+    audioCreate.value.saving = false
+  }
+}
+
+function isAudioUploading(audio) {
+  return uploadingAudioIds.value.includes(audio.id)
+}
+
+function uploadAudioAsset(audio) {
+  if (isAudioUploading(audio)) return
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/aac,.mp3,.wav,.m4a,.aac'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    uploadingAudioIds.value.push(audio.id)
+    try {
+      await audioAPI.upload(audio.id, file)
+      toast.success(`音频「${audio.name}」已上传`)
+      await load()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      uploadingAudioIds.value = uploadingAudioIds.value.filter(id => id !== audio.id)
+    }
+  }
+  input.click()
+}
+
+async function deleteAudioAsset(audio) {
+  if (!audio?.id) return
+  try {
+    await audioAPI.del(audio.id)
+    toast.success(`已删除「${audio.name || '音频'}」`)
+    await load()
+  } catch (e) {
+    toast.error(e.message)
+  }
 }
 
 function openAssetViewer(m) {
@@ -1315,6 +1484,8 @@ onBeforeUnmount(stopImageTasksPolling)
 .asset-group-head.is-scene .group-icon { color: #15803d; }
 .asset-group-head.is-prop { border-left-color: #b45309; background: rgba(180,83,9,0.1); color: #b45309; }
 .asset-group-head.is-prop .group-icon { color: #b45309; }
+.asset-group-head.is-audio { border-left-color: #7c3aed; background: rgba(124,58,237,0.1); color: #6d28d9; }
+.asset-group-head.is-audio .group-icon { color: #6d28d9; }
 .asset-card {
   display: flex; flex-direction: column; overflow: hidden;
   transition: transform 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out), border-color 0.18s var(--ease-out);
@@ -1514,6 +1685,176 @@ onBeforeUnmount(stopImageTasksPolling)
   text-overflow: ellipsis;
 }
 .asset-foot { display: flex; align-items: center; gap: 4px; padding: 7px 11px; border-top: 1px solid var(--border); }
+.audio-asset-grid { grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); }
+.audio-asset-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  min-height: 0;
+}
+.audio-card-cover {
+  position: relative;
+  height: 92px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 78% 18%, rgba(0, 113, 227, 0.28), transparent 42%),
+    linear-gradient(135deg, #eaf2fd 0%, #dfe8f3 100%);
+  color: #3b6f9e;
+}
+.audio-card-cover.ready {
+  background:
+    radial-gradient(circle at 72% 20%, rgba(52, 199, 89, 0.22), transparent 42%),
+    linear-gradient(135deg, #e7f7eb 0%, #deefe4 100%);
+  color: #2c7544;
+}
+.audio-cover-icon {
+  position: relative;
+  z-index: 2;
+  filter: drop-shadow(0 5px 10px rgba(49, 88, 128, 0.14));
+}
+.audio-wave {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  opacity: 0.72;
+  padding: 0 20px;
+}
+.audio-wave span {
+  width: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.42;
+  height: 12px;
+  animation: audio-eq 1.8s ease-in-out infinite;
+}
+.audio-wave span:nth-child(3n) { animation-delay: -0.35s; height: 28px; }
+.audio-wave span:nth-child(4n) { animation-delay: -0.75s; height: 38px; }
+.audio-wave span:nth-child(5n) { animation-delay: -1.1s; height: 20px; }
+.audio-cover-status {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 1px 4px rgba(15, 41, 62, 0.08);
+  color: var(--text-2);
+  font: 700 10px/1 var(--font-body);
+}
+.audio-card-cover.ready .audio-cover-status { color: #287c47; }
+.audio-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 11px 12px 9px;
+  min-width: 0;
+}
+.audio-title-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.audio-title-row .asset-name { min-width: 0; }
+.audio-kind-tag {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent-text);
+  font: 700 10px/1 var(--font-body);
+}
+.audio-player {
+  width: 100%;
+  height: 34px;
+  margin-top: 2px;
+  border-radius: 8px;
+}
+.audio-upload-empty {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 2px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  color: var(--text-2);
+  font: 600 11.5px var(--font-body);
+  cursor: pointer;
+  transition: border-color 0.16s var(--ease-out), color 0.16s var(--ease-out), background 0.16s var(--ease-out);
+}
+.audio-upload-empty:hover { border-color: var(--accent); color: var(--accent-text); background: var(--accent-bg); }
+.audio-asset-foot { justify-content: flex-start; gap: 7px; }
+.audio-foot-hint {
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.audio-asset-foot .btn:last-child { margin-left: auto; }
+.audio-add-card {
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-style: dashed;
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+}
+.audio-add-card:hover { color: var(--accent); border-color: var(--accent); }
+@keyframes audio-eq {
+  0%, 100% { transform: scaleY(0.45); opacity: 0.25; }
+  50% { transform: scaleY(1); opacity: 0.72; }
+}
+.audio-create-dialog { width: min(440px, calc(100vw - 32px)); }
+.audio-create-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 88% 15%, rgba(0, 113, 227, 0.13), transparent 38%),
+    var(--surface-soft);
+}
+.audio-create-icon {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-bg);
+  color: var(--accent-text);
+}
+.audio-create-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.audio-create-copy strong { font-size: 13px; color: var(--text-0); }
+.audio-create-copy span { font-size: 11.5px; line-height: 1.45; color: var(--text-2); }
 .prop-name-row {
   display: flex;
   align-items: center;

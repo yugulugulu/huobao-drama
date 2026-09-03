@@ -100,7 +100,7 @@ test('tasks route validates reference-mode requirements for video tasks', () => 
   assert.match(route, /多模态参考模式需要至少一个参考素材或 prompt/)
   assert.match(route, /referenceMode: 'reference'/)
   assert.match(route, /referenceVideoUrls: body\.reference_video_urls/)
-  assert.match(route, /referenceAudioUrls: body\.reference_audio_urls/)
+  assert.match(route, /referenceAudioUrls: mergedReferenceAudioUrls/)
   assert.match(route, /generateAudio: body\.generate_audio/)
 })
 

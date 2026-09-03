@@ -71,7 +71,7 @@ async function migrateLegacyData(pool: mysql.Pool) {
     userId = result.insertId
   }
 
-  const tenantTables = ['dramas', 'episodes', 'characters', 'scenes', 'storyboards', 'props', 'sys_task', 'video_merges', 'assets', 'ai_service_configs', 'style_presets']
+  const tenantTables = ['dramas', 'episodes', 'characters', 'scenes', 'storyboards', 'props', 'audios', 'sys_task', 'video_merges', 'assets', 'ai_service_configs', 'style_presets']
   for (const table of tenantTables) {
     await pool.query(`UPDATE \`${table}\` SET user_id = ? WHERE user_id IS NULL`, [userId])
   }
@@ -85,7 +85,7 @@ async function migrateLegacyData(pool: mysql.Pool) {
  * MODIFY COLUMN 可重复执行，适合当前项目的启动式轻量迁移机制。
  */
 async function enforceTenantOwnership(pool: mysql.Pool) {
-  const tenantTables = ['dramas', 'episodes', 'characters', 'scenes', 'storyboards', 'props', 'sys_task', 'video_merges', 'assets', 'ai_service_configs', 'style_presets']
+  const tenantTables = ['dramas', 'episodes', 'characters', 'scenes', 'storyboards', 'props', 'audios', 'sys_task', 'video_merges', 'assets', 'ai_service_configs', 'style_presets']
   for (const table of tenantTables) {
     await pool.query(`ALTER TABLE \`${table}\` MODIFY COLUMN user_id INT NOT NULL`)
   }

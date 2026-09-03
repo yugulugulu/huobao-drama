@@ -83,6 +83,15 @@ export function isManagedStorageReference(reference: string): boolean {
     || !!(OSS_PUBLIC_BASE_URL && normalized.startsWith(`${OSS_PUBLIC_BASE_URL}/`))
 }
 
+/** 校验存储引用属于指定用户，避免将其他用户上传的地址作为上游参考素材。 */
+export function isOwnedStorageReference(reference: string, userId: number): boolean {
+  try {
+    return objectOwnerId(referenceToKey(reference)) === userId
+  } catch {
+    return false
+  }
+}
+
 /** 下载远程生成结果并持久化到当前用户目录。 */
 export async function downloadFile(url: string, userId: number, subDir: string): Promise<string> {
   const response = await fetch(url)

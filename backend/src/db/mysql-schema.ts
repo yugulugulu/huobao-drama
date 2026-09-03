@@ -146,6 +146,36 @@ export const mysqlSchemaStatements = [
     INDEX idx_episode_props_prop_id (prop_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  `CREATE TABLE IF NOT EXISTS audios (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    drama_id INT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    file_url TEXT,
+    local_path TEXT,
+    file_size INT,
+    mime_type TEXT,
+    format TEXT,
+    created_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    deleted_at VARCHAR(64),
+    INDEX idx_audios_user_id (user_id),
+    INDEX idx_audios_drama_id (drama_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  `CREATE TABLE IF NOT EXISTS episode_audios (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    drama_id INT NOT NULL,
+    episode_id INT NOT NULL,
+    audio_id INT NOT NULL,
+    created_at VARCHAR(64) NOT NULL,
+    UNIQUE KEY uk_episode_audios_episode_audio (episode_id, audio_id),
+    INDEX idx_episode_audios_user_drama (user_id, drama_id),
+    INDEX idx_episode_audios_audio_id (audio_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   `CREATE TABLE IF NOT EXISTS storyboard_characters (
     storyboard_id INT NOT NULL,
     character_id INT NOT NULL,
@@ -158,6 +188,16 @@ export const mysqlSchemaStatements = [
     prop_id INT NOT NULL,
     PRIMARY KEY (storyboard_id, prop_id),
     INDEX idx_storyboard_props_prop_id (prop_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  `CREATE TABLE IF NOT EXISTS storyboard_audios (
+    user_id INT NOT NULL,
+    drama_id INT NOT NULL,
+    storyboard_id INT NOT NULL,
+    audio_id INT NOT NULL,
+    PRIMARY KEY (storyboard_id, audio_id),
+    INDEX idx_storyboard_audios_user_drama (user_id, drama_id),
+    INDEX idx_storyboard_audios_audio_id (audio_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
   `CREATE TABLE IF NOT EXISTS ai_service_configs (
@@ -298,7 +338,7 @@ export const mysqlSchemaStatements = [
  * 每条语句都允许重复失败，由下方的兼容执行器忽略已存在字段/索引错误，
  * 因此旧库和全新库都可在每次启动时安全执行。
  */
-const tenantTables = ['dramas', 'episodes', 'characters', 'scenes', 'storyboards', 'props', 'sys_task', 'video_merges', 'assets', 'ai_service_configs', 'style_presets']
+const tenantTables = ['dramas', 'episodes', 'characters', 'scenes', 'storyboards', 'props', 'audios', 'sys_task', 'video_merges', 'assets', 'ai_service_configs', 'style_presets']
 
 /**
  * CREATE TABLE IF NOT EXISTS 不会给存量表补列，因此所有历史版本后新增的字段都必须在这里声明。

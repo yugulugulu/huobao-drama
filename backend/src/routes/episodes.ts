@@ -46,6 +46,24 @@ app.post('/', async (c) => {
 
   const [ep] = await db.select().from(schema.episodes)
     .where(and(eq(schema.episodes.id, getInsertId(res)), eq(schema.episodes.userId, userId)))
+
+  // 项目级音频默认可用于每一集；后续只需在分镜中手动选择需要引用的音频。
+  const projectAudios = await db.select({ id: schema.audios.id }).from(schema.audios).where(and(
+    eq(schema.audios.userId, userId),
+    eq(schema.audios.dramaId, ep.dramaId),
+    isNull(schema.audios.deletedAt),
+  ))
+  for (const audio of projectAudios) {
+    await db.insert(schema.episodeAudios).values({
+      userId,
+      dramaId: ep.dramaId,
+      episodeId: ep.id,
+      audioId: audio.id,
+      createdAt: ts,
+    }).catch((error: any) => {
+      if (!String(error?.message || '').toLowerCase().includes('duplicate')) throw error
+    })
+  }
   return success(c, {
     id: ep.id,
     episode_number: ep.episodeNumber,
@@ -139,6 +157,28 @@ app.get('/:id/props', async (c) => {
   return success(c, toSnakeCaseArray(result))
 })
 
+// GET /episodes/:id/audios — 当前集已关联的音频资产
+app.get('/:id/audios', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  const userId = currentUser(c).id
+  const episode = await findOwnedEpisode(episodeId, userId)
+  if (!episode) return notFound(c, '剧集不存在')
+  const links = await db.select().from(schema.episodeAudios)
+    .where(and(
+      eq(schema.episodeAudios.userId, userId),
+      eq(schema.episodeAudios.dramaId, episode.dramaId),
+      eq(schema.episodeAudios.episodeId, episodeId),
+    ))
+  const ids = links.map(link => link.audioId)
+  if (!ids.length) return success(c, [])
+  const rows = await db.select().from(schema.audios).where(and(
+    eq(schema.audios.userId, userId),
+    eq(schema.audios.dramaId, episode.dramaId),
+    isNull(schema.audios.deletedAt),
+  ))
+  return success(c, toSnakeCaseArray(rows.filter(audio => ids.includes(audio.id))))
+})
+
 // POST /episodes/:id/extract — 异步提取资产（target: characters | scenes | props），立即返回，前端轮询状态
 app.post('/:id/extract', async (c) => {
   const id = Number(c.req.param('id'))
@@ -208,7 +248,8 @@ app.get('/:id/break-storyboard-status', async (c) => {
 app.get('/:episode_id/storyboards', async (c) => {
   const episodeId = Number(c.req.param('episode_id'))
   const userId = currentUser(c).id
-  if (!await findOwnedEpisode(episodeId, userId)) return notFound(c, '剧集不存在')
+  const episode = await findOwnedEpisode(episodeId, userId)
+  if (!episode) return notFound(c, '剧集不存在')
   const rows = await db.select().from(schema.storyboards)
     .where(and(eq(schema.storyboards.userId, userId), eq(schema.storyboards.episodeId, episodeId)))
     .orderBy(schema.storyboards.storyboardNumber)
@@ -232,6 +273,15 @@ app.get('/:episode_id/storyboards', async (c) => {
     propIdsByStoryboard.set(link.storyboardId, arr)
   }
 
+  const audioLinks = await db.select().from(schema.storyboardAudios)
+    .where(inArray(schema.storyboardAudios.storyboardId, rows.map(row => row.id)))
+  const audioIdsByStoryboard = new Map<number, number[]>()
+  for (const link of audioLinks) {
+    const arr = audioIdsByStoryboard.get(link.storyboardId) || []
+    arr.push(link.audioId)
+    audioIdsByStoryboard.set(link.storyboardId, arr)
+  }
+
   const episodeCharLinks = await db.select().from(schema.episodeCharacters)
     .where(eq(schema.episodeCharacters.episodeId, episodeId))
   const episodeCharIds = episodeCharLinks.map(link => link.characterId)
@@ -244,16 +294,28 @@ app.get('/:episode_id/storyboards', async (c) => {
   const allProps = (await db.select().from(schema.props).where(eq(schema.props.userId, userId)))
     .filter(p => episodePropIds.includes(p.id) && !p.deletedAt)
 
+  const episodeAudioLinks = await db.select().from(schema.episodeAudios)
+    .where(and(eq(schema.episodeAudios.userId, userId), eq(schema.episodeAudios.dramaId, episode.dramaId), eq(schema.episodeAudios.episodeId, episodeId)))
+  const episodeAudioIds = episodeAudioLinks.map(link => link.audioId)
+  const allAudios = (await db.select().from(schema.audios).where(and(
+    eq(schema.audios.userId, userId),
+    isNull(schema.audios.deletedAt),
+  ))).filter(audio => episodeAudioIds.includes(audio.id))
+
   return success(c, rows.map((row) => ({
     ...toSnakeCase(row),
     character_ids: charIdsByStoryboard.get(row.id) || [],
     prop_ids: propIdsByStoryboard.get(row.id) || [],
+    audio_ids: audioIdsByStoryboard.get(row.id) || [],
     characters: allChars
       .filter(ch => (charIdsByStoryboard.get(row.id) || []).includes(ch.id))
       .map(ch => toSnakeCase(ch)),
     props: allProps
       .filter(p => (propIdsByStoryboard.get(row.id) || []).includes(p.id))
       .map(p => toSnakeCase(p)),
+    audios: allAudios
+      .filter(audio => (audioIdsByStoryboard.get(row.id) || []).includes(audio.id))
+      .map(audio => toSnakeCase(audio)),
   })))
 })
 

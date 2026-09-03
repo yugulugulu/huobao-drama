@@ -261,7 +261,7 @@
               <Loader2 :size="24" class="animate-spin" style="color:var(--accent)" />
               <div class="loading-text">正在提取{{ extractingLabels }}...</div>
             </div>
-            <div v-else-if="!chars.length && !scenes.length && !propItems.length" class="step-empty asset-empty-state">
+            <div v-else-if="!chars.length && !scenes.length && !propItems.length && !audios.length" class="step-empty asset-empty-state">
               <div class="empty-visual">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               </div>
@@ -452,6 +452,64 @@
               </div>
             </div>
             <div v-else class="asset-props-empty">本集暂无涉及事态发展的关键道具</div>
+            <div class="asset-section-title">
+              音频
+              <button class="asset-add-btn" @click="openAssetCreate('audio')"><Plus :size="11" /> 新增</button>
+            </div>
+            <div v-if="audios.length" class="asset-grid">
+              <div
+                v-for="a in audios"
+                :key="a.id"
+                class="card asset-card audio-asset-card"
+                :class="{ 'is-ready': audioFileUrl(a) }"
+              >
+                <button class="asset-del-btn" title="删除音频" @click.stop="deleteAudioAsset(a)"><X :size="11" /></button>
+                <div class="audio-card-cover" :class="{ ready: audioFileUrl(a) }">
+                  <div class="audio-wave" aria-hidden="true">
+                    <span v-for="bar in 14" :key="bar"></span>
+                  </div>
+                  <Music :size="20" class="audio-cover-icon" />
+                  <span class="audio-cover-status">{{ audioFileUrl(a) ? '已上传' : '待上传' }}</span>
+                </div>
+                <div class="audio-card-body">
+                  <div class="audio-title-row">
+                    <span class="asset-name" :title="a.name">{{ a.name || '未命名音频' }}</span>
+                    <span class="audio-kind-tag">音频</span>
+                  </div>
+                  <div class="asset-meta asset-desc dim" :title="a.description || ''">{{ a.description || '暂无描述' }}</div>
+                  <audio
+                    v-if="audioFileUrl(a)"
+                    :src="audioFileUrl(a)"
+                    class="audio-player"
+                    controls
+                    preload="metadata"
+                  />
+                  <button
+                    v-else
+                    type="button"
+                    class="audio-upload-empty"
+                    @click="uploadAudioAsset(a)"
+                  >
+                    <Upload :size="14" />
+                    点击上传音频文件
+                  </button>
+                </div>
+                <div class="asset-foot audio-asset-foot">
+                  <span :class="['dot', audioFileUrl(a) && 'ok']" />
+                  <span class="audio-foot-hint">{{ audioFileUrl(a) ? '可播放' : '未上传文件' }}</span>
+                  <button
+                    class="btn btn-sm"
+                    :disabled="isAudioUploading(a)"
+                    @click="uploadAudioAsset(a)"
+                  >
+                    <Loader2 v-if="isAudioUploading(a)" :size="11" class="animate-spin" />
+                    <Upload v-else :size="11" />
+                    {{ audioFileUrl(a) ? '重新上传' : '上传' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div v-else class="asset-props-empty">本集暂无音频，可手动新增并上传音频文件</div>
             </template>
           </div>
 
@@ -672,7 +730,7 @@
                         :options="mentionOptions"
                         :rows="12"
                         input-class="textarea"
-                        placeholder="用 @角色名 / @场景名 / @道具名 引用参考素材，按 3 秒一段换行描述画面运动与镜头；也可点 AI 生成由提示词 Agent 自动创作…"
+                        placeholder="用 @角色名 / @场景名 / @道具名 / @音频名称 引用参考素材，按 3 秒一段换行描述画面运动与镜头；也可点 AI 生成由提示词 Agent 自动创作…"
                         @commit="v => updateField(selectedSb, 'video_prompt', v)"
                       />
                     </div>
@@ -684,12 +742,12 @@
                 <div class="storyboard-ref-head">
                   <div>
                     <div class="storyboard-ref-title">参考素材</div>
-                    <div class="storyboard-ref-copy">绑定角色 / 场景 / 道具作为视频参考</div>
+                    <div class="storyboard-ref-copy">绑定角色 / 场景 / 道具 / 音频作为视频参考</div>
                   </div>
                   <span class="tag mono">{{ refBindableAssets.filter(a => a.bound).length }}/{{ refBindableAssets.length }} 已绑定</span>
                 </div>
                 <div class="storyboard-ref-list">
-                  <template v-for="group in ['角色', '场景', '道具']" :key="group">
+                  <template v-for="group in ['角色', '场景', '道具', '音频']" :key="group">
                     <div v-if="refBindableAssets.filter(a => a.type === group).length" class="storyboard-ref-group">
                       <div class="storyboard-ref-group-label">{{ group }}</div>
                       <div
@@ -700,6 +758,7 @@
                         @click="toggleShotBind(selectedSb, asset)"
                       >
                         <button
+                          v-if="asset.type !== '音频'"
                           type="button"
                           class="storyboard-ref-thumb"
                           :disabled="!asset.ready"
@@ -708,21 +767,31 @@
                           <img v-if="asset.ready" :src="thumbOf(assetImageSrc({ imageUrl: asset.imageUrl }))" class="previewable-image" loading="lazy" @error="thumbFallback($event, assetImageSrc({ imageUrl: asset.imageUrl }))" />
                           <span v-else>{{ asset.type === '场景' ? '景' : asset.type === '道具' ? '具' : '角' }}</span>
                         </button>
+                        <button
+                          v-else
+                          type="button"
+                          class="storyboard-ref-thumb"
+                          :disabled="!asset.ready"
+                          @click.stop
+                        >
+                          <Music v-if="asset.ready" :size="15" />
+                          <span v-else>音</span>
+                        </button>
                         <div class="storyboard-ref-main">
                           <div class="storyboard-ref-line">
                             <span class="storyboard-ref-name">{{ asset.name }}</span>
                             <span :class="['storyboard-ref-state', asset.bound && asset.ready ? 'is-ready' : '']">
-                              {{ asset.bound ? (asset.ready ? '可参考' : '未生成') : '未绑定' }}
+                              {{ asset.bound ? (asset.ready ? '可参考' : (asset.type === '音频' ? '未上传' : '未生成')) : '未绑定' }}
                             </span>
                           </div>
                           <div class="storyboard-ref-meta">{{ asset.type }} · {{ asset.meta }}</div>
-                          <button v-if="asset.bound && !asset.ready" type="button" class="storyboard-ref-goto" @click.stop="prodTab = 'assets'">去生成 →</button>
+                          <button v-if="asset.bound && !asset.ready" type="button" class="storyboard-ref-goto" @click.stop="prodTab = 'assets'">{{ asset.type === '音频' ? '去上传 →' : '去生成 →' }}</button>
                         </div>
                       </div>
                     </div>
                   </template>
                   <div v-if="!refBindableAssets.length" class="storyboard-ref-empty">
-                    当前集还没有场景、角色或道具，先到「资产」提取素材后即可绑定。
+                    当前集还没有场景、角色、道具或音频，先到「资产」提取素材后即可绑定。
                   </div>
                 </div>
               </aside>
@@ -949,7 +1018,7 @@
                       :options="mentionOptions"
                       :rows="9"
                       input-class="textarea video-inspector-prompt"
-                      placeholder="用 @角色名 / @场景名 / @道具名 引用参考素材，生成时自动映射为参考图片；再按时间段描述画面运动与镜头…"
+                      placeholder="用 @角色名 / @场景名 / @道具名 / @音频名称 引用参考素材，生成时自动映射为参考图片；再按时间段描述画面运动与镜头…"
                       @commit="v => updateField(selectedSb, 'video_prompt', v)"
                     />
                   </section>
@@ -957,18 +1026,29 @@
                   <section class="video-inspector-section">
                     <span class="video-inspector-label">参考素材</span>
                     <div class="video-inspector-assets">
-                      <button
+                      <div
                         v-for="asset in getShotReferenceAssets(selectedSb)"
                         :key="asset.key"
-                        type="button"
-                        class="video-inspector-asset"
-                        :disabled="!asset.ready"
-                        @click="asset.ready && openImageViewer(assetImageSrc({ imageUrl: asset.imageUrl }), `${asset.name} ${asset.type}`)"
+                        :class="['video-inspector-asset', asset.type === '音频' && 'is-audio']"
                       >
-                        <img v-if="asset.ready" :src="thumbOf(assetImageSrc({ imageUrl: asset.imageUrl }))" :alt="asset.name" loading="lazy" @error="thumbFallback($event, assetImageSrc({ imageUrl: asset.imageUrl }))" />
-                        <span v-else>{{ asset.type }}</span>
-                        <small>{{ asset.name }}</small>
-                      </button>
+                        <button
+                          v-if="asset.type !== '音频'"
+                          type="button"
+                          class="video-inspector-asset-main"
+                          :disabled="!asset.ready"
+                          @click="asset.ready && openImageViewer(assetImageSrc({ imageUrl: asset.imageUrl }), `${asset.name} ${asset.type}`)"
+                        >
+                          <img v-if="asset.ready" :src="thumbOf(assetImageSrc({ imageUrl: asset.imageUrl }))" :alt="asset.name" loading="lazy" @error="thumbFallback($event, assetImageSrc({ imageUrl: asset.imageUrl }))" />
+                          <span v-else>{{ asset.type }}</span>
+                          <small>{{ asset.name }}</small>
+                        </button>
+                        <div v-else class="video-inspector-asset-main">
+                          <Music v-if="asset.ready" :size="15" class="video-inspector-audio-icon" />
+                          <span v-else>音</span>
+                          <audio v-if="asset.ready" :src="asset.fileUrl" controls preload="metadata" />
+                          <small>{{ asset.name }}</small>
+                        </div>
+                      </div>
                       <div v-if="!getShotReferenceAssets(selectedSb).length" class="video-inspector-empty">当前分镜未绑定参考素材</div>
                     </div>
                   </section>
@@ -1627,10 +1707,14 @@
               <label class="field"><span class="field-label">场景描述</span><textarea v-model="assetCreateDraft.prompt" class="textarea" rows="3" placeholder="环境、陈设、氛围" /></label>
               <label class="field"><span class="field-label">场景光影</span><input v-model="assetCreateDraft.lighting" class="input" placeholder="如：黄昏暖光、冷清顶光" /></label>
             </template>
-            <template v-else>
+            <template v-else-if="assetCreate.type === 'prop'">
               <label class="field"><span class="field-label">名称</span><input v-model="assetCreateDraft.name" class="input" placeholder="道具名称" /></label>
               <label class="field"><span class="field-label">类型</span><input v-model="assetCreateDraft.type" class="input" placeholder="如：武器 / 信物 / 文件" /></label>
               <label class="field"><span class="field-label">物品外貌</span><textarea v-model="assetCreateDraft.description" class="textarea" rows="3" placeholder="只描述物品的外观，与其他无关" /></label>
+            </template>
+            <template v-else-if="assetCreate.type === 'audio'">
+              <label class="field"><span class="field-label">音频名称</span><input v-model="assetCreateDraft.name" class="input" placeholder="音频名称" /></label>
+              <label class="field"><span class="field-label">描述 <span class="dim">（可选）</span></span><textarea v-model="assetCreateDraft.description" class="textarea" rows="3" placeholder="用于后续提示词引用时的辨认说明" /></label>
             </template>
           </div>
           <footer class="dialog-foot">
@@ -1696,7 +1780,7 @@
                 :options="mentionOptions"
                 :rows="16"
                 input-class="textarea storyboard-editor-textarea storyboard-editor-mention"
-                placeholder="用 @角色名 / @场景名 / @道具名 引用参考素材，按时间段描述画面运动与镜头…"
+                placeholder="用 @角色名 / @场景名 / @道具名 / @音频名称 引用参考素材，按时间段描述画面运动与镜头…"
                 @update:model-value="storyboardEditorDraft = $event"
                 @commit="storyboardEditorDraft = $event"
               />
@@ -1730,9 +1814,9 @@
 import { toast } from 'vue-sonner'
 import {
   Users, Video, FileText, FolderKanban, Clapperboard, Download, Loader2, RotateCcw,
-  MapPin, Play, Plus, Search, X, ListTodo, LogOut, Settings,
+  MapPin, Play, Plus, Search, X, ListTodo, LogOut, Settings, Music, Upload,
 } from 'lucide-vue-next'
-import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, aiConfigAPI, uploadAPI } from '~/composables/useApi'
+import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, aiConfigAPI, uploadAPI, audioAPI } from '~/composables/useApi'
 import { useAgent } from '~/composables/useAgent'
 
 definePageMeta({ layout: 'studio' })
@@ -1743,6 +1827,8 @@ const dramaId = Number(route.params.id)
 const episodeNumber = Number(route.params.episodeNumber)
 
 const drama = ref(null), episode = ref(null), chars = ref([]), scenes = ref([]), propItems = ref([]), sbs = ref([]), mergeData = ref(null)
+const audios = ref([])
+const uploadingAudioIds = ref([])
 // 工作台面板位置记忆（按剧集隔离）：刷新后回到上次所在步骤，而不是总是退回「改写」
 const PANEL_STORE_KEY = `studio:workbench:panel:${dramaId}:${episodeNumber}`
 const storedPanel = (() => {
@@ -1969,7 +2055,7 @@ function closeAssetDetail() {
 }
 
 // ─── 手动新增资产 ────────────────────────────────────────────
-const ASSET_TYPE_SHORT = { character: '角色', scene: '场景', prop: '道具' }
+const ASSET_TYPE_SHORT = { character: '角色', scene: '场景', prop: '道具', audio: '音频' }
 const assetCreate = ref({ open: false, type: 'character', saving: false })
 const assetCreateDraft = ref({})
 const assetCreateTypeLabel = computed(() => ASSET_TYPE_SHORT[assetCreate.value.type] || '资产')
@@ -1992,7 +2078,8 @@ async function saveAssetCreate() {
     const base = { drama_id: dramaId, episode_id: epId.value }
     if (type === 'character') await characterAPI.create({ ...base, name: d.name, role: d.role, appearance: d.appearance, styling: d.styling })
     else if (type === 'scene') await sceneAPI.create({ ...base, location: d.location, time: d.time, prompt: d.prompt, lighting: d.lighting })
-    else await propAPI.create({ ...base, name: d.name, type: d.type, description: d.description })
+    else if (type === 'prop') await propAPI.create({ ...base, name: d.name, type: d.type, description: d.description })
+    else if (type === 'audio') await audioAPI.create({ drama_id: dramaId, name: d.name, description: d.description })
     toast.success(`已新增${assetCreateTypeLabel.value}`)
     assetCreate.value.open = false
     await refresh()
@@ -2019,7 +2106,8 @@ async function confirmDeleteAsset() {
   try {
     if (type === 'character') await characterAPI.del(item.id)
     else if (type === 'scene') await sceneAPI.del(item.id)
-    else await propAPI.del(item.id)
+    else if (type === 'prop') await propAPI.del(item.id)
+    else if (type === 'audio') await audioAPI.del(item.id)
     toast.success(`已删除${assetDeleteTypeLabel.value}`)
     assetDelete.value.open = false
     if (assetDetail.value.open && assetDetail.value.type === type && assetDetail.value.item?.id === item.id) closeAssetDetail()
@@ -2163,6 +2251,47 @@ function assetImageSrc(item) {
   if (!raw) return ''
   if (/^https?:\/\//i.test(raw) || raw.startsWith('/')) return raw
   return `/${raw}`
+}
+
+function audioFileUrl(audio) {
+  const raw = audio?.file_url || audio?.fileUrl || audio?.local_path || audio?.localPath || ''
+  if (!raw) return ''
+  return /^https?:\/\//i.test(raw) || raw.startsWith('/') ? raw : `/${raw}`
+}
+
+function audioHasFile(audio) {
+  return !!audioFileUrl(audio)
+}
+
+function isAudioUploading(audio) {
+  return uploadingAudioIds.value.includes(audio?.id)
+}
+
+function uploadAudioAsset(audio) {
+  if (!audio?.id || isAudioUploading(audio)) return
+  pickFile('audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/aac,.mp3,.wav,.m4a,.aac', async (file) => {
+    uploadingAudioIds.value.push(audio.id)
+    try {
+      await audioAPI.upload(audio.id, file)
+      toast.success(`音频「${audio.name}」已上传`)
+      await refresh()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      uploadingAudioIds.value = uploadingAudioIds.value.filter(id => id !== audio.id)
+    }
+  })
+}
+
+async function deleteAudioAsset(audio) {
+  if (!audio?.id) return
+  try {
+    await audioAPI.del(audio.id)
+    toast.success(`已删除「${audio.name || '音频'}」`)
+    await refresh()
+  } catch (e) {
+    toast.error(e.message)
+  }
 }
 
 function assetDetailTitle(detail) {
@@ -2579,13 +2708,14 @@ function goNextStep() {
 const charImgCount = computed(() => visualChars.value.filter(c => c.image_url || c.imageUrl).length)
 const sceneImgCount = computed(() => scenes.value.filter(s => s.image_url || s.imageUrl).length)
 const propImgCount = computed(() => propItems.value.filter(p => p.image_url || p.imageUrl).length)
+const audioReadyCount = computed(() => audios.value.filter(a => audioHasFile(a)).length)
 const shotVidCount = computed(() => sbs.value.filter(s => s.video_url || s.videoUrl).length)
 const visualCharTotal = computed(() => visualChars.value.length)
 const pendingCharacterImageCount = computed(() => Math.max(visualCharTotal.value - charImgCount.value, 0))
 const pendingSceneImageCount = computed(() => Math.max(scenes.value.length - sceneImgCount.value, 0))
 const pendingAssetImageCount = computed(() => pendingCharacterImageCount.value + pendingSceneImageCount.value)
-const assetTotalCount = computed(() => visualCharTotal.value + scenes.value.length + propItems.value.length)
-const assetReadyCount = computed(() => charImgCount.value + sceneImgCount.value + propImgCount.value)
+const assetTotalCount = computed(() => visualCharTotal.value + scenes.value.length + propItems.value.length + audios.value.length)
+const assetReadyCount = computed(() => charImgCount.value + sceneImgCount.value + propImgCount.value + audioReadyCount.value)
 
 const prodTabDefs = computed(() => [
   { id: 'assets', label: '资产', icon: FolderKanban, badge: assetTotalCount.value ? `${assetReadyCount.value}/${assetTotalCount.value}` : '' },
@@ -2913,6 +3043,23 @@ function toggleStoryboardProp(sb, propId) {
   updateField(sb, 'prop_ids', nextIds)
 }
 
+function getStoryboardAudioIds(sb) {
+  return sb?.audio_ids || sb?.audioIds || []
+}
+
+function getStoryboardAudios(sb) {
+  const ids = getStoryboardAudioIds(sb)
+  return audios.value.filter(a => ids.includes(a.id))
+}
+
+function toggleStoryboardAudio(sb, audioId) {
+  const currentIds = getStoryboardAudioIds(sb)
+  const nextIds = currentIds.includes(audioId)
+    ? currentIds.filter(id => id !== audioId)
+    : [...currentIds, audioId]
+  updateField(sb, 'audio_ids', nextIds)
+}
+
 function getSceneName(sb) {
   const scene = getStoryboardScene(sb)
   if (!scene) return ''
@@ -2941,6 +3088,7 @@ async function refresh() {
       try { chars.value = await episodeAPI.characters(ep.id) } catch { chars.value = [] }
       try { scenes.value = await episodeAPI.scenes(ep.id) } catch { scenes.value = [] }
       try { propItems.value = await episodeAPI.props(ep.id) } catch { propItems.value = [] }
+      try { audios.value = await episodeAPI.audios(ep.id) } catch { audios.value = [] }
       sbs.value = await episodeAPI.storyboards(ep.id)
       selectedSbIds.value = selectedSbIds.value.filter(id => sbs.value.some(sb => sb.id === id))
       if (sbs.value.length) {
@@ -3229,14 +3377,15 @@ async function genVideoPrompt(sb) {
   const label = cfg ? `${cfg.name} (${cfg.provider})` : '默认'
   const charNames = getStoryboardCharacters(sb).map(c => c.name).join('、') || '无'
   const propNames = getStoryboardProps(sb).map(p => p.name).join('、') || '无'
+  const audioNames = getStoryboardAudios(sb).filter(a => audioHasFile(a)).map(a => a.name).join('、') || '无'
   videoPromptGeneratingIds.value.push(sb.id)
   try {
     await api.post(`/agent/prompt_generator/chat`, {
       message: `请为分镜 #${idx}(ID:${sb.id})生成视频提示词(video_prompt)。视频模型:${label},请根据该模型的特性和时长限制生成。
 
-该分镜信息:时长 ${sb.duration || 10}s;场景:${getSceneName(sb) || '未绑定'};角色:${charNames};道具:${propNames}。
+该分镜信息:时长 ${sb.duration || 10}s;场景:${getSceneName(sb) || '未绑定'};角色:${charNames};道具:${propNames};已绑定音频:${audioNames}。
 
-请先调用 read_storyboard_context 获取该分镜的画面描述(含【镜头N】子镜头与台词/旁白)、氛围及时长,据此生成 video_prompt(按 3 秒分段换行、用 @角色名/@场景名/@道具名 引用参考素材；段落内允许多镜头切镜,但不跨场景,切镜点对齐 description 的【镜头N】结构),然后调用 update_storyboard 保存到分镜 ID:${sb.id}。只更新 video_prompt 字段,不要改动其他字段,不要重新拆分整集。`,
+请先调用 read_storyboard_context 获取该分镜的画面描述(含【镜头N】子镜头与台词/旁白)、氛围及时长,据此生成 video_prompt(按 3 秒分段换行、用 @角色名/@场景名/@道具名/@音频名称 引用参考素材；已绑定音频没有出现在上述列表时不要自行编造音频名；段落内允许多镜头切镜,但不跨场景,切镜点对齐 description 的【镜头N】结构),然后调用 update_storyboard 保存到分镜 ID:${sb.id}。只更新 video_prompt 字段,不要改动其他字段,不要重新拆分整集。`,
       drama_id: dramaId,
       episode_id: epId.value,
       model: chatModelOverride() || undefined,
@@ -3474,6 +3623,16 @@ function getShotReferenceAssets(sb) {
       ready: !!imageUrl,
     })
   }
+  for (const audio of getStoryboardAudios(sb)) {
+    assets.push({
+      key: `audio-${audio.id}`,
+      type: '音频',
+      name: audio.name || '未命名音频',
+      meta: audio.description || '音频素材',
+      fileUrl: audioFileUrl(audio),
+      ready: audioHasFile(audio),
+    })
+  }
   return assets.slice(0, 6)
 }
 
@@ -3519,6 +3678,18 @@ function shotBindableAssets(sb) {
       bound: getStoryboardPropIds(sb).includes(prop.id),
     })
   }
+  for (const audio of audios.value) {
+    out.push({
+      key: `audio-${audio.id}`,
+      id: audio.id,
+      type: '音频',
+      name: audio.name || '未命名音频',
+      meta: audio.description || '音频素材',
+      fileUrl: audioFileUrl(audio),
+      ready: audioHasFile(audio),
+      bound: getStoryboardAudioIds(sb).includes(audio.id),
+    })
+  }
   // 固定顺序（角色→场景→道具，按资产原顺序）：点击绑定/解绑不重排，避免跳动
   return out
 }
@@ -3538,6 +3709,14 @@ function toggleShotBind(sb, asset) {
   }
   if (asset.type === '角色') {
     toggleStoryboardCharacter(sb, asset.id)
+    return
+  }
+  if (asset.type === '音频') {
+    if (!asset.ready) {
+      toast.warning('请先上传音频文件')
+      return
+    }
+    toggleStoryboardAudio(sb, asset.id)
     return
   }
   toggleStoryboardProp(sb, asset.id)
@@ -3583,6 +3762,12 @@ const mentionOptions = computed(() => {
       group: '道具',
       image: thumbOf(assetImageSrc(p)),
     })),
+    ...getStoryboardAudios(sb).filter(a => audioHasFile(a)).map(a => ({
+      label: a.name,
+      value: a.name,
+      group: '音频',
+      image: '',
+    })),
   ]
 })
 
@@ -3608,16 +3793,34 @@ function getShotReferenceIndexMap(sb) {
   return nameToIndex
 }
 
-// 将视频提示词里的 @名字 替换为 @图片N名字（N 为参考图序号，1 起），生成时使用
-function resolveVideoPromptRefs(sb) {
-  const prompt = sb.video_prompt || sb.videoPrompt || ''
-  const map = getShotReferenceIndexMap(sb)
-  const names = Object.keys(map).sort((a, b) => b.length - a.length)
-  if (!names.length) return prompt
+// 生成时的音频引用：仅保留当前分镜已绑定、已上传且提示词中实际出现 @音频名 的音频，顺序与 reference_audio_urls 一致。
+function getNamedAudioAssets(sb, prompt) {
+  return getStoryboardAudios(sb)
+    .filter(a => a.name && audioHasFile(a) && prompt.includes(`@${a.name}`))
+    .slice(0, 3)
+}
+
+// 将视频提示词里的 @名字 替换为 @图片N名字 / @音频N名字（N 为对应参考素材在 content 中的序号，1 起），生成时使用。
+function resolveVideoPromptRefs(sb, rawPrompt, audioAssets) {
+  const prompt = rawPrompt || sb.video_prompt || sb.videoPrompt || ''
+  const imageMap = getShotReferenceIndexMap(sb)
+  const imageNames = Object.keys(imageMap).sort((a, b) => b.length - a.length)
+  const chosenAudioAssets = audioAssets || getNamedAudioAssets(sb, prompt)
+  const audioMap = {}
+  chosenAudioAssets.forEach((a, i) => {
+    if (a.name && !(a.name in audioMap)) audioMap[a.name] = i + 1
+  })
+  const audioNames = Object.keys(audioMap).sort((a, b) => b.length - a.length)
+  if (!imageNames.length && !audioNames.length) return prompt
   return prompt.replace(/@([^\s@]+)/g, (m, raw) => {
-    for (const name of names) {
+    for (const name of audioNames) {
       if (raw.startsWith(name)) {
-        return `@图片${map[name]}${name}${raw.slice(name.length)}`
+        return `@音频${audioMap[name]}${name}${raw.slice(name.length)}`
+      }
+    }
+    for (const name of imageNames) {
+      if (raw.startsWith(name)) {
+        return `@图片${imageMap[name]}${name}${raw.slice(name.length)}`
       }
     }
     return m
@@ -3700,10 +3903,17 @@ function removeRefMedia(kind, index) {
 
 async function genVid(sb) {
   const referenceImages = getShotReferenceImages(sb)
+  const rawPrompt = sb.video_prompt || sb.videoPrompt || ''
+  const namedAudioAssets = getNamedAudioAssets(sb, rawPrompt)
+  const prompt = resolveVideoPromptRefs(sb, rawPrompt, namedAudioAssets)
+  const referenceAudioUrls = [
+    ...namedAudioAssets.map(a => audioFileUrl(a)).filter(Boolean),
+    ...videoRefAudioUrls.value,
+  ].filter((url, index, list) => list.indexOf(url) === index).slice(0, 3)
   const params = {
     storyboard_id: sb.id,
     drama_id: dramaId,
-    prompt: resolveVideoPromptRefs(sb),
+    prompt,
     duration: Number(videoDuration.value || sb.duration || 10),
     aspect_ratio: videoAspectRatio.value,
     generate_audio: true,
@@ -3711,7 +3921,7 @@ async function genVid(sb) {
     config_id: ownerConfigId(videoModelOptions.value, videoModel.value),
     reference_image_urls: referenceImages,
     reference_video_urls: videoRefVideoUrls.value,
-    reference_audio_urls: videoRefAudioUrls.value,
+    reference_audio_urls: referenceAudioUrls,
   }
   if (params.reference_audio_urls.length && !referenceImages.length && !params.reference_video_urls.length) {
     toast.error('参考音频需要至少 1 个参考图片或视频')
@@ -3752,7 +3962,7 @@ async function pollVideoGeneration(generationId, storyboardId) {
     try {
       const res = await taskAPI.get(generationId)
       await refresh()
-      if (res?.status === 'completed') {
+      if (['completed', 'succeeded'].includes(res?.status)) {
         pendingVideoIds.value = pendingVideoIds.value.filter(item => item !== storyboardId)
         delete failedVideoMessages.value[storyboardId]
         toast.success('视频生成完成')
@@ -5270,6 +5480,133 @@ onMounted(async () => {
   font-size: 12px;
   text-align: center;
 }
+.audio-asset-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  min-height: 0;
+}
+.audio-card-cover {
+  position: relative;
+  height: 92px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 78% 18%, rgba(0, 113, 227, 0.28), transparent 42%),
+    linear-gradient(135deg, #eaf2fd 0%, #dfe8f3 100%);
+  color: #3b6f9e;
+}
+.audio-card-cover.ready {
+  background:
+    radial-gradient(circle at 72% 20%, rgba(52, 199, 89, 0.22), transparent 42%),
+    linear-gradient(135deg, #e7f7eb 0%, #deefe4 100%);
+  color: #2c7544;
+}
+.audio-cover-icon {
+  position: relative;
+  z-index: 2;
+  filter: drop-shadow(0 5px 10px rgba(49, 88, 128, 0.14));
+}
+.audio-wave {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  opacity: 0.72;
+  padding: 0 20px;
+}
+.audio-wave span {
+  width: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.42;
+  height: 12px;
+  animation: audio-eq 1.8s ease-in-out infinite;
+}
+.audio-wave span:nth-child(3n) { animation-delay: -0.35s; height: 28px; }
+.audio-wave span:nth-child(4n) { animation-delay: -0.75s; height: 38px; }
+.audio-wave span:nth-child(5n) { animation-delay: -1.1s; height: 20px; }
+.audio-cover-status {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 1px 4px rgba(15, 41, 62, 0.08);
+  color: var(--text-2);
+  font: 700 10px/1 var(--font-body);
+}
+.audio-card-cover.ready .audio-cover-status { color: #287c47; }
+.audio-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 11px 12px 9px;
+  min-width: 0;
+}
+.audio-title-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.audio-title-row .asset-name { min-width: 0; }
+.audio-kind-tag {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent-text);
+  font: 700 10px/1 var(--font-body);
+}
+.audio-player {
+  width: 100%;
+  height: 34px;
+  margin-top: 2px;
+  border-radius: 8px;
+}
+.audio-upload-empty {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 2px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  color: var(--text-2);
+  font: 600 11.5px var(--font-body);
+  cursor: pointer;
+  transition: border-color 0.16s var(--ease-out), color 0.16s var(--ease-out), background 0.16s var(--ease-out);
+}
+.audio-upload-empty:hover { border-color: var(--accent); color: var(--accent-text); background: var(--accent-bg); }
+.audio-asset-foot { justify-content: flex-start; gap: 7px; }
+.audio-foot-hint {
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.audio-asset-foot .btn:last-child { margin-left: auto; }
+@keyframes audio-eq {
+  0%, 100% { transform: scaleY(0.45); opacity: 0.25; }
+  50% { transform: scaleY(1); opacity: 0.72; }
+}
 .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; align-items: stretch; }
 .character-asset-grid {
   display: grid;
@@ -5966,8 +6303,46 @@ onMounted(async () => {
   cursor: pointer;
 }
 .video-inspector-asset:disabled { cursor: default; }
-.video-inspector-asset img { width: 100%; height: 86px; display: block; object-fit: cover; }
-.video-inspector-asset > span { min-height: 86px; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+.video-inspector-asset-main {
+  position: relative;
+  width: 100%;
+  min-height: 86px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.video-inspector-asset-main img { width: 100%; height: 86px; display: block; object-fit: cover; }
+.video-inspector-asset-main > span { min-height: 86px; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+.video-inspector-asset-main small {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 4px 6px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 10px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.video-inspector-asset.is-audio { cursor: default; }
+.video-inspector-asset.is-audio .video-inspector-asset-main {
+  display: flex;
+  min-height: 86px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 6px 22px;
+  cursor: default;
+}
+.video-inspector-audio-icon { color: var(--text-2); }
+.video-inspector-asset.is-audio audio { width: 100%; height: 28px; }
 .video-inspector-asset small {
   position: absolute;
   right: 0;

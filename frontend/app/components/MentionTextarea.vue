@@ -33,7 +33,7 @@
               @pointerdown.prevent="pick(opt)"
               @mousemove="highlightIdx = flatIndex(gi, oi)"
             >
-              <span :class="['mention-avatar', `mention-avatar-${opt.group === '场景' ? 'scene' : (opt.group === '道具' ? 'prop' : 'role')}`]">
+              <span :class="['mention-avatar', `mention-avatar-${opt.group === '场景' ? 'scene' : (opt.group === '道具' ? 'prop' : (opt.group === '音频' ? 'audio' : 'role'))}`]">
                 <img v-if="opt.image" :src="opt.image" alt="" @error="$event.target.style.display = 'none'" />
                 <component v-else :is="groupIcon(opt.group)" :size="12" :stroke-width="2" />
               </span>
@@ -50,10 +50,10 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { User, MapPin, Package } from 'lucide-vue-next'
+import { User, MapPin, Package, Music } from 'lucide-vue-next'
 
 // 无图资产在下拉中显示分组图标兜底（场景=定位、道具=包裹、角色=人物）
-const groupIcon = (group) => (group === '场景' ? MapPin : group === '道具' ? Package : User)
+const groupIcon = (group) => (group === '场景' ? MapPin : group === '道具' ? Package : group === '音频' ? Music : User)
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -87,15 +87,28 @@ const DROPDOWN_MAX_HEIGHT = 220
 
 // 下拉 Teleport 到 body 后用 fixed 定位，任何外层滚动/窗口变化都会使其错位 → 直接关闭
 function closeOnOuterScroll(e) {
-  if (mention.value.open && e?.target !== taEl.value) closeMention()
+  if (!mention.value.open) return
+  if (e?.target === taEl.value) return
+  if (dropdownEl.value && e?.target instanceof Node && dropdownEl.value.contains(e.target)) return
+  closeMention()
 }
+
+function handleDocumentPointerDown(e) {
+  if (!mention.value.open) return
+  if (wrapEl.value?.contains(e.target)) return
+  if (dropdownEl.value?.contains(e.target)) return
+  closeMention()
+}
+
 onMounted(() => {
   window.addEventListener('scroll', closeOnOuterScroll, true)
   window.addEventListener('resize', closeOnOuterScroll)
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', closeOnOuterScroll, true)
   window.removeEventListener('resize', closeOnOuterScroll)
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
 })
 
 watch(() => props.modelValue, (v) => {
@@ -110,7 +123,9 @@ watch(() => props.modelValue, (v) => {
 const mentionNames = computed(() => {
   const seen = new Map()
   for (const o of props.options) {
-    if (o.value && !seen.has(o.value)) seen.set(o.value, o.group === '场景' ? 'scene' : 'role')
+    if (o.value && !seen.has(o.value)) {
+      seen.set(o.value, o.group === '场景' ? 'scene' : o.group === '道具' ? 'prop' : o.group === '音频' ? 'audio' : 'role')
+    }
   }
   return [...seen.entries()].sort((a, b) => b[0].length - a[0].length)
 })
@@ -406,6 +421,14 @@ function onBlur(e) {
 .mention-backdrop :deep(.mention-token-scene) {
   color: #248a3d;
   background: var(--success-bg);
+}
+.mention-backdrop :deep(.mention-token-prop) {
+  color: #b45309;
+  background: rgba(180,83,9,0.1);
+}
+.mention-backdrop :deep(.mention-token-audio) {
+  color: #7c3aed;
+  background: rgba(124,58,237,0.1);
 }
 .mention-dropdown {
   position: fixed;
