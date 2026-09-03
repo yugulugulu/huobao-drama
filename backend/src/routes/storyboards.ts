@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, created, now, badRequest, notFound } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
@@ -56,7 +56,38 @@ async function getStoryboardPropIds(storyboardId: number) {
   return links.map(link => link.propId)
 }
 
-async function validateStoryboardBindings(episodeId: number, sceneId: number | null | undefined, characterIds: number[] | undefined, propIds?: number[] | undefined) {
+async function syncStoryboardAudios(storyboardId: number, audioIds: number[], userId: number, dramaId: number) {
+  await db.delete(schema.storyboardAudios)
+    .where(eq(schema.storyboardAudios.storyboardId, storyboardId))
+
+  const uniqueIds = [...new Set((audioIds || []).map(Number).filter(Number.isInteger))]
+  if (!uniqueIds.length) return
+
+  for (const audioId of uniqueIds) {
+    await db.insert(schema.storyboardAudios).values({
+      userId,
+      dramaId,
+      storyboardId,
+      audioId,
+    })
+  }
+}
+
+async function getStoryboardAudioIds(storyboardId: number) {
+  const links = await db.select().from(schema.storyboardAudios)
+    .where(eq(schema.storyboardAudios.storyboardId, storyboardId))
+  return links.map(link => link.audioId)
+}
+
+async function validateStoryboardBindings(
+  episodeId: number,
+  sceneId: number | null | undefined,
+  characterIds: number[] | undefined,
+  propIds?: number[] | undefined,
+  audioIds?: number[] | undefined,
+  userId?: number,
+  dramaId?: number,
+) {
   const sceneLinks = await db.select().from(schema.episodeScenes)
     .where(eq(schema.episodeScenes.episodeId, episodeId))
   const episodeSceneIds = new Set(sceneLinks.map(link => link.sceneId))
@@ -80,13 +111,39 @@ async function validateStoryboardBindings(episodeId: number, sceneId: number | n
   if (invalidPropIds.length) {
     throw new Error('prop_ids 必须来自当前集已关联道具')
   }
+
+  const normalizedAudioIds = [...new Set((audioIds || []).map(Number).filter(Number.isInteger))]
+  if (!normalizedAudioIds.length) return
+  if (!userId || !dramaId) throw new Error('音频绑定缺少用户或项目上下文')
+
+  const episodeAudioLinks = await db.select().from(schema.episodeAudios)
+    .where(and(
+      eq(schema.episodeAudios.episodeId, episodeId),
+      eq(schema.episodeAudios.userId, userId),
+      eq(schema.episodeAudios.dramaId, dramaId),
+    ))
+  const episodeAudioIds = new Set(episodeAudioLinks.map(link => link.audioId))
+  const audios = await db.select().from(schema.audios).where(and(
+    eq(schema.audios.userId, userId),
+    eq(schema.audios.dramaId, dramaId),
+    isNull(schema.audios.deletedAt),
+    inArray(schema.audios.id, normalizedAudioIds),
+  ))
+  const usableAudioIds = new Set(audios
+    .filter(audio => episodeAudioIds.has(audio.id) && !!(audio.fileUrl || audio.localPath))
+    .map(audio => audio.id))
+  const invalidAudioIds = normalizedAudioIds.filter(id => !usableAudioIds.has(id))
+  if (invalidAudioIds.length) {
+    throw new Error('audio_ids 必须来自当前集已关联且已上传的音频')
+  }
 }
 
 // POST /storyboards
 app.post('/', async (c) => {
   const body = await c.req.json()
   const userId = currentUser(c).id
-  if (!await findOwnedEpisode(Number(body.episode_id), userId)) return notFound(c, '剧集不存在')
+  const episode = await findOwnedEpisode(Number(body.episode_id), userId)
+  if (!episode) return notFound(c, '剧集不存在')
   const ts = now()
   logTaskStart('StoryboardAPI', 'create', {
     episodeId: body.episode_id,
@@ -95,7 +152,7 @@ app.post('/', async (c) => {
     characterIds: body.character_ids,
   })
   logTaskPayload('StoryboardAPI', 'create body', body)
-  await validateStoryboardBindings(body.episode_id, body.scene_id, body.character_ids, body.prop_ids)
+  await validateStoryboardBindings(body.episode_id, body.scene_id, body.character_ids, body.prop_ids, body.audio_ids, userId, episode.dramaId)
   const res = await db.insert(schema.storyboards).values({
     userId,
     episodeId: body.episode_id,
@@ -109,6 +166,7 @@ app.post('/', async (c) => {
   })
   await syncStoryboardCharacters(getInsertId(res), body.character_ids || [])
   await syncStoryboardProps(getInsertId(res), body.prop_ids || [])
+  await syncStoryboardAudios(getInsertId(res), body.audio_ids || [], userId, episode.dramaId)
   const [result] = await db.select().from(schema.storyboards)
     .where(and(eq(schema.storyboards.id, getInsertId(res)), eq(schema.storyboards.userId, userId)))
   logTaskSuccess('StoryboardAPI', 'create', {
@@ -120,6 +178,7 @@ app.post('/', async (c) => {
     ...toSnakeCase(result),
     character_ids: await getStoryboardCharacterIds(result.id),
     prop_ids: await getStoryboardPropIds(result.id),
+    audio_ids: await getStoryboardAudioIds(result.id),
   })
 })
 
@@ -130,6 +189,8 @@ app.put('/:id', async (c) => {
   const body = await c.req.json()
   const storyboard = await findOwnedStoryboard(id, userId)
   if (!storyboard) return notFound(c, '镜头不存在')
+  const episode = await findOwnedEpisode(storyboard.episodeId, userId)
+  if (!episode) return notFound(c, '剧集不存在')
   logTaskStart('StoryboardAPI', 'update', {
     storyboardId: id,
     episodeId: storyboard.episodeId,
@@ -162,16 +223,21 @@ app.put('/:id', async (c) => {
     'scene_id' in body ? body.scene_id : storyboard.sceneId,
     'character_ids' in body ? body.character_ids : await getStoryboardCharacterIds(id),
     'prop_ids' in body ? body.prop_ids : await getStoryboardPropIds(id),
+    'audio_ids' in body ? body.audio_ids : await getStoryboardAudioIds(id),
+    userId,
+    episode.dramaId,
   )
 
   await db.update(schema.storyboards).set(updates).where(and(eq(schema.storyboards.id, id), eq(schema.storyboards.userId, userId)))
   if ('character_ids' in body) await syncStoryboardCharacters(id, body.character_ids || [])
   if ('prop_ids' in body) await syncStoryboardProps(id, body.prop_ids || [])
+  if ('audio_ids' in body) await syncStoryboardAudios(id, body.audio_ids || [], userId, episode.dramaId)
   logTaskSuccess('StoryboardAPI', 'update', {
     storyboardId: id,
     updatedFields: Object.keys(updates),
     characterIds: body.character_ids,
     propIds: body.prop_ids,
+    audioIds: body.audio_ids,
   })
   return success(c)
 })
@@ -184,6 +250,7 @@ app.delete('/:id', async (c) => {
   logTaskStart('StoryboardAPI', 'delete', { storyboardId: id })
   await db.delete(schema.storyboardCharacters).where(eq(schema.storyboardCharacters.storyboardId, id))
   await db.delete(schema.storyboardProps).where(eq(schema.storyboardProps.storyboardId, id))
+  await db.delete(schema.storyboardAudios).where(eq(schema.storyboardAudios.storyboardId, id))
   await db.delete(schema.storyboards).where(and(eq(schema.storyboards.id, id), eq(schema.storyboards.userId, userId)))
   logTaskSuccess('StoryboardAPI', 'delete', { storyboardId: id })
   return success(c)

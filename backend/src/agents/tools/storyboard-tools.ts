@@ -273,6 +273,7 @@ const saveStoryboards = createTool({
       for (const storyboardId of existingStoryboardIds) {
         await tx.delete(schema.storyboardCharacters).where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
         await tx.delete(schema.storyboardProps).where(eq(schema.storyboardProps.storyboardId, storyboardId))
+        await tx.delete(schema.storyboardAudios).where(eq(schema.storyboardAudios.storyboardId, storyboardId))
       }
       await tx.delete(schema.storyboards).where(and(eq(schema.storyboards.userId, userId), eq(schema.storyboards.episodeId, episodeId)))
 

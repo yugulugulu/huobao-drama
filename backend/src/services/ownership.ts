@@ -15,6 +15,7 @@ export const findOwnedEpisode = (id: number, userId: number) => owned<typeof sch
 export const findOwnedCharacter = (id: number, userId: number) => owned<typeof schema.characters.$inferSelect>(schema.characters, id, userId)
 export const findOwnedScene = (id: number, userId: number) => owned<typeof schema.scenes.$inferSelect>(schema.scenes, id, userId)
 export const findOwnedProp = (id: number, userId: number) => owned<typeof schema.props.$inferSelect>(schema.props, id, userId)
+export const findOwnedAudio = (id: number, userId: number) => owned<typeof schema.audios.$inferSelect>(schema.audios, id, userId)
 export const findOwnedStoryboard = (id: number, userId: number) => owned<typeof schema.storyboards.$inferSelect>(schema.storyboards, id, userId)
 export const findOwnedTask = (id: number, userId: number) => owned<typeof schema.sysTask.$inferSelect>(schema.sysTask, id, userId)
 

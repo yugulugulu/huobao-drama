@@ -1,15 +1,28 @@
 import { Hono } from 'hono'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, created, badRequest, notFound } from '../utils/response.js'
 import { generateImage, generateVideo } from '../services/generation.js'
 import { logTaskError, logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import { currentUser } from '../middleware/auth.js'
 import { findOwnedCharacter, findOwnedDrama, findOwnedScene, findOwnedStoryboard, findOwnedTask } from '../services/ownership.js'
+import { isOwnedStorageReference } from '../utils/storage.js'
 
 const app = new Hono()
 
 type TaskType = 'image' | 'video'
+
+function uniqueUrls(values: unknown): string[] {
+  if (!Array.isArray(values)) return []
+  return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))]
+}
+
+function promptReferencesName(prompt: string, name: string): boolean {
+  if (!name) return false
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return prompt.includes(`@${name}`)
+    || new RegExp(`@音频\\d+${escaped}(?![^\\s@])`).test(prompt)
+}
 
 // POST /tasks — 发起生成任务（body.type: image | video）
 app.post('/', async (c) => {
@@ -24,7 +37,7 @@ app.post('/', async (c) => {
     // 视频生成只保留多模态参考：校验素材上限与必填项
     const imgs = body.reference_image_urls?.length || 0
     const vids = body.reference_video_urls?.length || 0
-    const auds = body.reference_audio_urls?.length || 0
+    const auds = uniqueUrls(body.reference_audio_urls).length
     if (imgs > 9 || vids > 3 || auds > 3) {
       return badRequest(c, '参考素材超限：图片≤9、视频≤3、音频≤3')
     }
@@ -44,6 +57,12 @@ app.post('/', async (c) => {
     // 集锁定的生成配置优先于请求指定；视频分辨率同样锁定到集
     let configId: number | undefined = body.config_id
     let episodeResolution: string | undefined
+    let mergedReferenceAudioUrls = uniqueUrls(body.reference_audio_urls)
+    for (const reference of mergedReferenceAudioUrls) {
+      if (!isOwnedStorageReference(reference, userId)) {
+        return badRequest(c, '参考音频必须是当前用户上传的文件')
+      }
+    }
     if (body.storyboard_id) {
       const [sb] = await db.select().from(schema.storyboards).where(and(eq(schema.storyboards.id, Number(body.storyboard_id)), eq(schema.storyboards.userId, userId)))
       if (sb) {
@@ -51,7 +70,43 @@ app.post('/', async (c) => {
         const locked = type === 'image' ? ep?.imageConfigId : ep?.videoConfigId
         if (locked != null) configId = locked
         if (type === 'video' && ep?.resolution) episodeResolution = ep.resolution
+
+        if (type === 'video' && ep) {
+          const storyboardLinks = await db.select().from(schema.storyboardAudios).where(and(
+            eq(schema.storyboardAudios.userId, userId),
+            eq(schema.storyboardAudios.dramaId, ep.dramaId),
+            eq(schema.storyboardAudios.storyboardId, sb.id),
+          ))
+          const episodeLinks = await db.select().from(schema.episodeAudios).where(and(
+            eq(schema.episodeAudios.userId, userId),
+            eq(schema.episodeAudios.dramaId, ep.dramaId),
+            eq(schema.episodeAudios.episodeId, ep.id),
+          ))
+          const episodeAudioIds = new Set(episodeLinks.map(link => link.audioId))
+          const audioIds = [...new Set(storyboardLinks.map(link => link.audioId))]
+            .filter(audioId => episodeAudioIds.has(audioId))
+          if (audioIds.length) {
+            const audios = await db.select().from(schema.audios).where(and(
+              eq(schema.audios.userId, userId),
+              eq(schema.audios.dramaId, ep.dramaId),
+              inArray(schema.audios.id, audioIds),
+              isNull(schema.audios.deletedAt),
+            ))
+            const prompt = String(body.prompt || '')
+            const assetUrls = audios
+              .filter(audio => audio.fileUrl && promptReferencesName(prompt, audio.name))
+              .map(audio => audio.fileUrl!)
+            mergedReferenceAudioUrls = uniqueUrls([...assetUrls, ...mergedReferenceAudioUrls])
+          }
+        }
       }
+    }
+
+    if (type === 'video') {
+      const imgs = Array.isArray(body.reference_image_urls) ? body.reference_image_urls.length : 0
+      const vids = Array.isArray(body.reference_video_urls) ? body.reference_video_urls.length : 0
+      if (mergedReferenceAudioUrls.length > 3) return badRequest(c, '参考素材超限：图片≤9、视频≤3、音频≤3')
+      if (mergedReferenceAudioUrls.length > 0 && imgs + vids === 0) return badRequest(c, '参考音频需要至少 1 个参考图片或视频')
     }
 
     logTaskStart('TaskAPI', 'generate', {
@@ -86,7 +141,7 @@ app.post('/', async (c) => {
         referenceMode: 'reference',
         referenceImageUrls: body.reference_image_urls,
         referenceVideoUrls: body.reference_video_urls,
-        referenceAudioUrls: body.reference_audio_urls,
+        referenceAudioUrls: mergedReferenceAudioUrls,
         generateAudio: body.generate_audio,
         duration: body.duration,
         aspectRatio: body.aspect_ratio,

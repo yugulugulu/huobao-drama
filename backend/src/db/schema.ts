@@ -99,6 +99,15 @@ export const episodeProps = mysqlTable('episode_props', {
   createdAt: varchar('created_at', { length: 64 }).notNull(),
 })
 
+export const episodeAudios = mysqlTable('episode_audios', {
+  id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
+  dramaId: int('drama_id').notNull(),
+  episodeId: int('episode_id').notNull(),
+  audioId: int('audio_id').notNull(),
+  createdAt: varchar('created_at', { length: 64 }).notNull(),
+})
+
 export const scenes = mysqlTable('scenes', {
   id: int('id').primaryKey().autoincrement(),
   userId: int('user_id').notNull(),
@@ -163,6 +172,15 @@ export const storyboardProps = mysqlTable('storyboard_props', {
   propId: int('prop_id').notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.storyboardId, table.propId] }),
+}))
+
+export const storyboardAudios = mysqlTable('storyboard_audios', {
+  userId: int('user_id').notNull(),
+  dramaId: int('drama_id').notNull(),
+  storyboardId: int('storyboard_id').notNull(),
+  audioId: int('audio_id').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.storyboardId, table.audioId] }),
 }))
 
 export const aiServiceConfigs = mysqlTable('ai_service_configs', {
@@ -270,6 +288,22 @@ export const props = mysqlTable('props', {
   imageUrl: text('image_url'),
   referenceImages: text('reference_images'),
   localPath: text('local_path'),
+  createdAt: varchar('created_at', { length: 64 }).notNull(),
+  updatedAt: varchar('updated_at', { length: 64 }).notNull(),
+  deletedAt: varchar('deleted_at', { length: 64 }),
+})
+
+export const audios = mysqlTable('audios', {
+  id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
+  dramaId: int('drama_id').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  fileUrl: text('file_url'),
+  localPath: text('local_path'),
+  fileSize: int('file_size'),
+  mimeType: text('mime_type'),
+  format: text('format'),
   createdAt: varchar('created_at', { length: 64 }).notNull(),
   updatedAt: varchar('updated_at', { length: 64 }).notNull(),
   deletedAt: varchar('deleted_at', { length: 64 }),

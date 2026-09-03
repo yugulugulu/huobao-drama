@@ -25,13 +25,23 @@ const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.m4v'])
 const VIDEO_MIME = new Set(['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'])
 const VIDEO_MAX = 50 * 1024 * 1024 // 50MB
 
-const AUDIO_EXT = new Set(['.mp3', '.wav', '.m4a', '.aac'])
-const AUDIO_MIME = new Set(['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/x-m4a', 'audio/aac'])
-const AUDIO_MAX = 20 * 1024 * 1024 // 20MB
+export const AUDIO_EXT = new Set(['.mp3', '.wav', '.m4a', '.aac'])
+export const AUDIO_MIME = new Set(['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/x-m4a', 'audio/aac'])
+export const AUDIO_MAX = 20 * 1024 * 1024 // 20MB
 
-function extOf(name: string): string {
+export function extOf(name: string): string {
   const i = name.lastIndexOf('.')
   return i >= 0 ? name.slice(i).toLowerCase() : ''
+}
+
+export function validateAudioFile(file: File, byteLength: number) {
+  const ext = extOf(file.name)
+  const mimeKnown = file.type && file.type !== 'application/octet-stream'
+  if (!AUDIO_EXT.has(ext) || (mimeKnown && !AUDIO_MIME.has(file.type))) {
+    throw new Error(`仅支持 ${Array.from(AUDIO_EXT).join('/')} 格式的音频文件`)
+  }
+  if (byteLength > AUDIO_MAX) throw new Error('音频文件大小不能超过 20MB')
+  return ext.slice(1)
 }
 
 async function saveMediaUpload(
