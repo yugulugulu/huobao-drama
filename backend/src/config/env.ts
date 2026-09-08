@@ -2,7 +2,7 @@
  * 环境配置加载与校验。
  *
  * 开发机默认读取 .env.development，生产环境只读取 .env.production。
- * 不同环境使用各自的 OSS 桶和凭据，避免开发资源与生产资源混用。
+ * 不同环境使用各自的对象存储桶和凭据，避免开发资源与生产资源混用。
  */
 import dotenv from 'dotenv'
 import path from 'path'
@@ -27,10 +27,18 @@ export function validateEnvironment() {
   const missing: string[] = []
   const invalid = (value: string | undefined) => !value || value.includes('请填写')
   if (invalid(process.env.JWT_SECRET) || process.env.JWT_SECRET!.length < 32) missing.push('JWT_SECRET（至少 32 位）')
-  if (storageDriver !== 'local' && storageDriver !== 'oss') missing.push('STORAGE_DRIVER（仅支持 local 或 oss）')
+  if (storageDriver !== 'local' && storageDriver !== 'oss' && storageDriver !== 'tos') {
+    missing.push('STORAGE_DRIVER（仅支持 local、oss 或 tos）')
+  }
 
   if (storageDriver === 'oss') {
     for (const key of ['OSS_REGION', 'OSS_BUCKET', 'OSS_ACCESS_KEY_ID', 'OSS_ACCESS_KEY_SECRET', 'OSS_PUBLIC_BASE_URL']) {
+      if (invalid(process.env[key])) missing.push(key)
+    }
+  }
+
+  if (storageDriver === 'tos') {
+    for (const key of ['TOS_REGION', 'TOS_ENDPOINT', 'TOS_BUCKET', 'TOS_ACCESS_KEY', 'TOS_SECRET_KEY', 'TOS_PUBLIC_BASE_URL']) {
       if (invalid(process.env[key])) missing.push(key)
     }
   }
