@@ -7,13 +7,17 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import OSS from 'ali-oss'
+import { ACLType, TosClient } from '@volcengine/tos-sdk'
 import sharp from 'sharp'
 import { v4 as uuid } from 'uuid'
 import { localStorageRoot, storageDriver } from '../config/env.js'
 
 const OSS_PUBLIC_BASE_URL = (process.env.OSS_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
+const TOS_PUBLIC_BASE_URL = (process.env.TOS_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
+const STORAGE_PUBLIC_BASE_URL = storageDriver === 'tos' ? TOS_PUBLIC_BASE_URL : OSS_PUBLIC_BASE_URL
 
 let ossClient: OSS | null = null
+let tosClient: TosClient | null = null
 
 function getOssClient(): OSS {
   if (!ossClient) {
@@ -25,6 +29,19 @@ function getOssClient(): OSS {
     })
   }
   return ossClient
+}
+
+function getTosClient(): TosClient {
+  if (!tosClient) {
+    tosClient = new TosClient({
+      accessKeyId: process.env.TOS_ACCESS_KEY!,
+      accessKeySecret: process.env.TOS_SECRET_KEY!,
+      region: process.env.TOS_REGION!,
+      endpoint: process.env.TOS_ENDPOINT!,
+      bucket: process.env.TOS_BUCKET!,
+    })
+  }
+  return tosClient
 }
 
 function normalizeSubDir(subDir: string): string {
@@ -47,27 +64,37 @@ function objectOwnerId(key: string): number {
 }
 
 function keyToReference(key: string): string {
-  return storageDriver === 'oss' ? `${OSS_PUBLIC_BASE_URL}/${key}` : `static/${key}`
+  return storageDriver === 'local' ? `static/${key}` : `${STORAGE_PUBLIC_BASE_URL}/${key}`
 }
 
 function referenceToKey(reference: string): string {
   const normalized = reference.replace(/^\//, '')
   if (normalized.startsWith('static/')) return normalized.slice('static/'.length)
-  if (OSS_PUBLIC_BASE_URL && normalized.startsWith(`${OSS_PUBLIC_BASE_URL}/`)) {
-    return normalized.slice(OSS_PUBLIC_BASE_URL.length + 1)
+  if (STORAGE_PUBLIC_BASE_URL && normalized.startsWith(`${STORAGE_PUBLIC_BASE_URL}/`)) {
+    return normalized.slice(STORAGE_PUBLIC_BASE_URL.length + 1)
   }
   throw new Error(`不是当前存储驱动管理的文件：${reference}`)
 }
 
 async function putBuffer(key: string, buffer: Buffer): Promise<string> {
-  if (storageDriver === 'oss') {
+  if (storageDriver === 'oss' || storageDriver === 'tos') {
     const userId = objectOwnerId(key)
-    await getOssClient().put(key, buffer, {
-      headers: {
-        'x-oss-object-acl': 'public-read',
-        'x-oss-meta-user-id': String(userId),
-      },
-    })
+    if (storageDriver === 'oss') {
+      await getOssClient().put(key, buffer, {
+        headers: {
+          'x-oss-object-acl': 'public-read',
+          'x-oss-meta-user-id': String(userId),
+        },
+      })
+    } else {
+      await getTosClient().putObject({
+        bucket: process.env.TOS_BUCKET!,
+        key,
+        body: buffer,
+        acl: ACLType.ACLPublicRead,
+        meta: { 'user-id': String(userId) },
+      })
+    }
   } else {
     const filePath = path.join(localStorageRoot, key)
     fs.mkdirSync(path.dirname(filePath), { recursive: true })
@@ -80,7 +107,7 @@ async function putBuffer(key: string, buffer: Buffer): Promise<string> {
 export function isManagedStorageReference(reference: string): boolean {
   const normalized = String(reference || '').replace(/^\//, '')
   return normalized.startsWith('static/')
-    || !!(OSS_PUBLIC_BASE_URL && normalized.startsWith(`${OSS_PUBLIC_BASE_URL}/`))
+    || !!(STORAGE_PUBLIC_BASE_URL && normalized.startsWith(`${STORAGE_PUBLIC_BASE_URL}/`))
 }
 
 /** 校验存储引用属于指定用户，避免将其他用户上传的地址作为上游参考素材。 */
@@ -116,6 +143,16 @@ export async function saveLocalFile(localPath: string, userId: number, subDir: s
         'x-oss-object-acl': 'public-read',
         'x-oss-meta-user-id': String(objectOwnerId(key)),
       },
+    })
+    return keyToReference(key)
+  }
+  if (storageDriver === 'tos') {
+    await getTosClient().putObjectFromFile({
+      bucket: process.env.TOS_BUCKET!,
+      key,
+      filePath: localPath,
+      acl: ACLType.ACLPublicRead,
+      meta: { 'user-id': String(objectOwnerId(key)) },
     })
     return keyToReference(key)
   }
@@ -166,6 +203,14 @@ export function thumbPathFor(reference: string): string {
 /** 读取本地或 OSS 文件内容；HTTP 历史资源也可兼容读取。 */
 export async function readStorageBuffer(reference: string): Promise<Buffer> {
   if (/^https?:\/\//.test(reference)) {
+    if (storageDriver === 'tos' && isManagedStorageReference(reference)) {
+      const response = await getTosClient().getObjectV2({
+        bucket: process.env.TOS_BUCKET!,
+        key: referenceToKey(reference),
+        dataType: 'buffer',
+      })
+      return response.data.content
+    }
     const response = await fetch(reference)
     if (!response.ok) throw new Error(`读取远程文件失败：${response.status}`)
     return Buffer.from(await response.arrayBuffer())
