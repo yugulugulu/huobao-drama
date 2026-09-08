@@ -4,15 +4,17 @@ FROM node:20-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
-    COPY frontend/ ./
-    RUN npm run generate
+COPY frontend/ ./
+RUN npm run generate
 
 # ── Stage 2: Build backend native modules ────────────────────
 FROM node:20-slim AS backend-build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ \
+    python3 make g++ ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
+ENV FFMPEG_BIN=/usr/bin/ffmpeg
 
 WORKDIR /app/backend
 COPY backend/package.json backend/package-lock.json ./
@@ -23,8 +25,10 @@ RUN npm ci --omit=dev
 # ── Stage 3: Production image (lean) ────────────────────────
 FROM node:20-slim
 
-# tsx 直接运行 TS 源码;ffmpeg 用 npm 包 ffmpeg-static/ffprobe-static 内置二进制,无需系统安装
-RUN npm i -g tsx
+# tsx 直接运行 TS 源码；ffmpeg 使用系统包，避免 ffmpeg-static 下载二进制失败
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm i -g tsx
 
 WORKDIR /app
 
@@ -46,6 +50,7 @@ RUN mkdir -p data/static
 
 ENV NODE_ENV=production
 ENV PORT=5679
+ENV FFMPEG_BIN=/usr/bin/ffmpeg
 
 EXPOSE 5679
 VOLUME ["/app/data"]
