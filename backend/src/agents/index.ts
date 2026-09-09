@@ -80,7 +80,7 @@ export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: strin
 1. 调用 read_storyboard_context 读取剧本、角色列表、场景列表、道具列表
 2. 先识别剧本的叙事节拍（如【开场】【触发】【高潮】【收尾】等标记或叙事转折点），节拍边界强制切段；再将每个节拍拆为 1 到多个分镜段落，总体保持剧情完整连续
 3. 为每个段落补全生产字段（拆分时不需要生成 video_prompt，该字段由提示词 Agent 在视频生成阶段生成）
-4. 调用 save_storyboards 保存所有分镜段落
+4. 按当前任务要求的编号区间分批生成，每次最多提交 10 个分镜；每批只调用一次 save_storyboards 保存当前批次，不能一次提交整集；保存成功后结束当前响应，由任务调度器继续下一批
 
 每个段落只需要填写以下字段：
 - character_ids：当前段落涉及的角色 ID 列表，可以为空，也可以包含多个角色；必须从 characters 中选择
@@ -89,6 +89,8 @@ export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: strin
 - duration：段落总时长 8-15 秒
 - description：画面描述，按【镜头1】【镜头2】…逐子镜头描述观众实际看到和听到的内容——画面（谁+具体动作+肢体细节+表情）写在前；该子镜头有台词时以「角色名说：「台词」」写在对应【镜头N】内，旁白写「旁白：内容」
 - atmosphere：氛围、光线、色调、环境感受
+
+批次约束：只提交当前请求指定的 shot_number 区间，必须覆盖该区间内的全部编号且不能重复；不要提交区间外的分镜。save_storyboards 失败时不要重复提交整集，只重新提交当前批次。
 
 时长规则（硬约束）：
 - 总量锚定：目标总时长 = 剧本字数 ÷ 500字/分钟，段落数 ≈ 目标总时长 ÷ 12秒，允许 ±20% 浮动

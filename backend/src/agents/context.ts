@@ -10,6 +10,12 @@ export interface AgentRequestContextValues {
   dramaId: number
   modelOverride?: string
   textConfigId?: number
+  storyboardTaskId?: string
+  storyboardBatchIndex?: number
+  storyboardTotalBatches?: number
+  storyboardBatchStart?: number
+  storyboardBatchEnd?: number
+  storyboardRetryCount?: number
 }
 
 export function buildAgentRequestContext(values: AgentRequestContextValues): RequestContext<AgentRequestContextValues> {
@@ -19,6 +25,12 @@ export function buildAgentRequestContext(values: AgentRequestContextValues): Req
   rc.set('dramaId', values.dramaId)
   if (values.modelOverride) rc.set('modelOverride', values.modelOverride)
   if (values.textConfigId) rc.set('textConfigId', values.textConfigId)
+  if (values.storyboardTaskId) rc.set('storyboardTaskId', values.storyboardTaskId)
+  if (values.storyboardBatchIndex != null) rc.set('storyboardBatchIndex', values.storyboardBatchIndex)
+  if (values.storyboardTotalBatches != null) rc.set('storyboardTotalBatches', values.storyboardTotalBatches)
+  if (values.storyboardBatchStart != null) rc.set('storyboardBatchStart', values.storyboardBatchStart)
+  if (values.storyboardBatchEnd != null) rc.set('storyboardBatchEnd', values.storyboardBatchEnd)
+  if (values.storyboardRetryCount != null) rc.set('storyboardRetryCount', values.storyboardRetryCount)
   return rc
 }
 
@@ -36,4 +48,28 @@ export function getEpisodeId(requestContext: RequestContext | undefined): number
 export function getDramaId(requestContext: RequestContext | undefined): number | null {
   const v = requestContext?.get('dramaId' as never)
   return typeof v === 'number' ? v : null
+}
+
+export function getStoryboardTaskId(requestContext: RequestContext | undefined): string | null {
+  const v = requestContext?.get('storyboardTaskId' as never)
+  return typeof v === 'string' && v ? v : null
+}
+
+export interface StoryboardBatchContext {
+  batchIndex: number
+  totalBatches: number
+  batchStart: number
+  batchEnd: number
+  retryCount: number
+}
+
+export function getStoryboardBatch(requestContext: RequestContext | undefined): StoryboardBatchContext | null {
+  const value = (key: string) => requestContext?.get(key as never)
+  const batchIndex = value('storyboardBatchIndex')
+  const totalBatches = value('storyboardTotalBatches')
+  const batchStart = value('storyboardBatchStart')
+  const batchEnd = value('storyboardBatchEnd')
+  const retryCount = value('storyboardRetryCount')
+  if (typeof batchIndex !== 'number' || typeof totalBatches !== 'number' || typeof batchStart !== 'number' || typeof batchEnd !== 'number' || typeof retryCount !== 'number') return null
+  return { batchIndex, totalBatches, batchStart, batchEnd, retryCount }
 }

@@ -119,6 +119,41 @@ export const mysqlSchemaStatements = [
     deleted_at VARCHAR(64)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  `CREATE TABLE IF NOT EXISTS storyboard_breakdown_tasks (
+    task_id VARCHAR(64) NOT NULL PRIMARY KEY,
+    user_id INT NOT NULL,
+    drama_id INT NOT NULL,
+    episode_id INT NOT NULL,
+    message TEXT NOT NULL,
+    model TEXT,
+    config_id INT,
+    status VARCHAR(16) NOT NULL DEFAULT 'queued',
+    stage VARCHAR(32) NOT NULL DEFAULT '读取剧本',
+    total_batches INT NOT NULL DEFAULT 1,
+    completed_batches INT NOT NULL DEFAULT 0,
+    current_batch INT,
+    retry_count INT NOT NULL DEFAULT 0,
+    target_shots INT NOT NULL DEFAULT 1,
+    error TEXT,
+    started_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    finished_at VARCHAR(64),
+    active_key VARCHAR(128),
+    UNIQUE KEY uk_storyboard_breakdown_tasks_active (active_key),
+    INDEX idx_storyboard_breakdown_tasks_episode (user_id, episode_id),
+    INDEX idx_storyboard_breakdown_tasks_status (status)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  `CREATE TABLE IF NOT EXISTS storyboard_breakdown_items (
+    task_id VARCHAR(64) NOT NULL,
+    batch_index INT NOT NULL,
+    shot_number INT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at VARCHAR(64) NOT NULL,
+    PRIMARY KEY (task_id, shot_number),
+    INDEX idx_storyboard_breakdown_items_batch (task_id, batch_index)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   `CREATE TABLE IF NOT EXISTS episode_characters (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     episode_id INT NOT NULL,
@@ -353,6 +388,7 @@ export const mysqlColumnBackfillStatements = [
   { table: 'scenes', column: 'lighting', sql: 'ALTER TABLE `scenes` ADD COLUMN `lighting` TEXT' },
   { table: 'scenes', column: 'final_prompt', sql: 'ALTER TABLE `scenes` ADD COLUMN `final_prompt` TEXT' },
   { table: 'props', column: 'final_prompt', sql: 'ALTER TABLE `props` ADD COLUMN `final_prompt` TEXT' },
+  { table: 'storyboard_breakdown_tasks', column: 'active_key', sql: 'ALTER TABLE `storyboard_breakdown_tasks` ADD COLUMN `active_key` VARCHAR(128)' },
 ]
 
 export const tenantMigrationStatements = [
@@ -361,6 +397,7 @@ export const tenantMigrationStatements = [
   ...tenantTables.map(table => `CREATE INDEX idx_${table}_user_id ON \`${table}\` (user_id)`),
   'ALTER TABLE style_presets DROP INDEX uk_style_presets_value',
   'ALTER TABLE style_presets ADD UNIQUE KEY uk_style_presets_user_value (user_id, value)',
+  'ALTER TABLE storyboard_breakdown_tasks ADD UNIQUE KEY uk_storyboard_breakdown_tasks_active (active_key)',
   `CREATE TABLE IF NOT EXISTS user_agent_configs (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,

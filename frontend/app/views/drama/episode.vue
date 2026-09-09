@@ -535,7 +535,7 @@
 
             <div v-if="storyboardBreakdown.running" class="storyboard-breakdown-progress">
               <div class="storyboard-breakdown-spinner"><Loader2 :size="22" class="animate-spin" /></div>
-              <div class="storyboard-breakdown-title">{{ storyboardBreakdown.stage }}</div>
+              <div class="storyboard-breakdown-title">{{ storyboardBreakdown.stage }}<span v-if="storyboardBreakdown.total_batches"> · 第 {{ storyboardBreakdown.current_batch || Math.min(storyboardBreakdown.completed_batches + 1, storyboardBreakdown.total_batches) }} / {{ storyboardBreakdown.total_batches }} 批</span></div>
               <div class="storyboard-breakdown-meta">已用时 {{ storyboardElapsedText }}</div>
               <div class="storyboard-breakdown-track"><span /></div>
               <div class="storyboard-breakdown-hint">
@@ -546,7 +546,7 @@
             <div v-else-if="storyboardBreakdown.status === 'failed'" class="storyboard-breakdown-failed">
               <div class="storyboard-breakdown-failed-title">分镜拆分失败</div>
               <div class="storyboard-breakdown-failed-stage">失败阶段：{{ storyboardBreakdown.stage }}</div>
-              <div class="storyboard-breakdown-error">{{ storyboardBreakdown.error || '未返回具体错误信息' }}</div>
+              <div class="storyboard-breakdown-error">{{ storyboardBreakdown.error || '未返回具体错误信息' }}<span v-if="storyboardBreakdown.current_batch">（失败批次：{{ storyboardBreakdown.current_batch }}）</span></div>
               <button class="btn btn-primary" :disabled="storyboardBreakdown.running" @click="doBreakdown">
                 <RotateCcw :size="13" /> 重试
               </button>
@@ -1838,7 +1838,7 @@ const storedPanel = (() => {
 let panelRestored = !!storedPanel
 const panel = ref(['production', 'export'].includes(storedPanel?.panel) ? storedPanel.panel : 'script')
 const { running: rn, runningType: rt, run: runAgent } = useAgent()
-const storyboardBreakdown = ref({ status: null, stage: '读取剧本', started_at: '', updated_at: '', finished_at: '', error: '', result_count: 0, elapsed: 0, running: false })
+const storyboardBreakdown = ref({ status: null, stage: '读取剧本', started_at: '', updated_at: '', finished_at: '', error: '', result_count: 0, total_batches: 0, completed_batches: 0, current_batch: 0, retry_count: 0, target_shots: 0, elapsed: 0, running: false })
 let storyboardBreakdownTimer = null
 let storyboardBreakdownPollTimer = null
 const storyboardElapsedText = computed(() => {
@@ -3322,8 +3322,8 @@ function stopStoryboardBreakdownPolling() {
   storyboardBreakdownPollTimer = null
 }
 
-// 前端轮询时长略高于后端 10 分钟超时，确保能拿到最终失败状态。
-async function pollStoryboardBreakdown(attempts = 360) {
+// 多批次任务可能超过单批模型请求的超时，前端保持轮询直到较长保护窗口结束。
+async function pollStoryboardBreakdown(attempts = 1800) {
   const tick = async (left) => {
     try {
       const task = await episodeAPI.breakStoryboardStatus(epId.value)

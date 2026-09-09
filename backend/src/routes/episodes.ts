@@ -230,10 +230,10 @@ app.post('/:id/break-storyboard', async (c) => {
   const ep = await findOwnedEpisode(id, userId)
   if (!ep) return notFound(c, '剧集不存在')
   if (!body.message) return badRequest(c, 'message required')
-  const started = startStoryboardBreakdown(ep.id, ep.dramaId, {
+  const result = await startStoryboardBreakdown(ep.id, ep.dramaId, {
     userId, message: body.message, model: body.model || undefined, configId: body.config_id ?? undefined,
   })
-  return success(c, { status: 'running', already_running: !started })
+  return success(c, { status: 'running', already_running: !result.started, task_id: result.taskId })
 })
 
 // GET /episodes/:id/break-storyboard-status — 查询分镜拆分任务
@@ -241,7 +241,7 @@ app.get('/:id/break-storyboard-status', async (c) => {
   const id = Number(c.req.param('id'))
   const userId = currentUser(c).id
   if (!await findOwnedEpisode(id, userId)) return notFound(c, '剧集不存在')
-  return success(c, getStoryboardBreakdownStatus(userId, id))
+  return success(c, await getStoryboardBreakdownStatus(userId, id))
 })
 
 // GET /episodes/:episode_id/storyboards

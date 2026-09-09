@@ -9,7 +9,7 @@ import { db, getInsertId, schema } from '../../db/index.js'
 import { and, eq } from 'drizzle-orm'
 import { now } from '../../utils/response.js'
 import { logTaskProgress, logTaskSuccess } from '../../utils/task-logger.js'
-import { getDramaId, getEpisodeId, getUserId } from '../context.js'
+import { getDramaId, getEpisodeId, getStoryboardBatch, getStoryboardTaskId, getUserId } from '../context.js'
 
 async function syncStoryboardCharacters(conn: any, storyboardId: number, characterIds: number[]) {
   await conn.delete(schema.storyboardCharacters)
@@ -60,38 +60,54 @@ async function getEpisodePropIds(conn: any, episodeId: number) {
   return new Set(links.map((link: any) => link.propId))
 }
 
-async function validateStoryboardBindings(conn: any, userId: number, episodeId: number, dramaId: number, sceneId: number | null | undefined, characterIds: number[] | undefined, propIds?: number[] | undefined) {
+async function validateStoryboardBindings(
+  conn: any,
+  userId: number,
+  episodeId: number,
+  dramaId: number,
+  sceneId: number | null | undefined,
+  characterIds: number[] | undefined,
+  propIds?: number[] | undefined,
+  syncEpisodeLinks = true,
+) {
   const episodeSceneIds = await getEpisodeSceneIds(conn, episodeId)
   const episodeCharacterIds = await getEpisodeCharacterIds(conn, episodeId)
   const episodePropIds = await getEpisodePropIds(conn, episodeId)
 
-  // 场景/角色/道具属于本剧但尚未关联到当前集时，自动补关联（拆分时即完成绑定）
-  if (sceneId != null && !episodeSceneIds.has(sceneId)) {
+  // 场景/角色/道具必须属于本剧；正式写入时自动补齐当前集关联。
+  if (sceneId != null) {
     const [scene] = await conn.select().from(schema.scenes).where(and(eq(schema.scenes.id, sceneId), eq(schema.scenes.userId, userId)))
     if (!scene || scene.dramaId !== dramaId || scene.deletedAt) {
       throw new Error(`scene_id ${sceneId} 不属于当前项目`)
     }
-    await conn.insert(schema.episodeScenes).values({ episodeId, sceneId, createdAt: now() })
+    if (syncEpisodeLinks && !episodeSceneIds.has(sceneId)) {
+      await conn.insert(schema.episodeScenes).values({ episodeId, sceneId, createdAt: now() })
+      episodeSceneIds.add(sceneId)
+    }
   }
 
   const uniqueCharacterIds = [...new Set((characterIds || []).filter(Boolean))]
   for (const characterId of uniqueCharacterIds) {
-    if (episodeCharacterIds.has(characterId)) continue
     const [character] = await conn.select().from(schema.characters).where(and(eq(schema.characters.id, characterId), eq(schema.characters.userId, userId)))
     if (!character || character.dramaId !== dramaId || character.deletedAt) {
       throw new Error(`character_id ${characterId} 不属于当前项目`)
     }
-    await conn.insert(schema.episodeCharacters).values({ episodeId, characterId, createdAt: now() })
+    if (syncEpisodeLinks && !episodeCharacterIds.has(characterId)) {
+      await conn.insert(schema.episodeCharacters).values({ episodeId, characterId, createdAt: now() })
+      episodeCharacterIds.add(characterId)
+    }
   }
 
   const uniquePropIds = [...new Set((propIds || []).filter(Boolean))]
   for (const propId of uniquePropIds) {
-    if (episodePropIds.has(propId)) continue
     const [prop] = await conn.select().from(schema.props).where(and(eq(schema.props.id, propId), eq(schema.props.userId, userId)))
     if (!prop || prop.dramaId !== dramaId || prop.deletedAt) {
       throw new Error(`prop_id ${propId} 不属于当前项目`)
     }
-    await conn.insert(schema.episodeProps).values({ episodeId, propId, createdAt: now() })
+    if (syncEpisodeLinks && !episodePropIds.has(propId)) {
+      await conn.insert(schema.episodeProps).values({ episodeId, propId, createdAt: now() })
+      episodePropIds.add(propId)
+    }
   }
 }
 
@@ -231,86 +247,90 @@ const readStoryboardContext = createTool({
 
 const saveStoryboards = createTool({
   id: 'save_storyboards',
-  description: 'Save generated storyboards. Replaces all existing storyboards for this episode.',
+  description: 'Save one small batch of generated storyboards to the current breakdown draft. It never replaces existing storyboards.',
   inputSchema: z.object({
     storyboards: z.array(z.object({
-      shot_number: z.number(),
-      title: z.string().optional(),
-      shot_type: z.string().optional(),
-      angle: z.string().optional(),
-      movement: z.string().optional(),
-      location: z.string().optional(),
-      time: z.string().optional(),
-      description: z.string().optional(),
-      result: z.string().optional(),
-      atmosphere: z.string().optional(),
-      image_prompt: z.string().optional(),
-      video_prompt: z.string().optional(),
-      bgm_prompt: z.string().optional(),
-      sound_effect: z.string().optional(),
-      duration: z.number().optional(),
-      scene_id: z.number().nullable().optional(),
-      character_ids: z.array(z.number()).optional(),
-      prop_ids: z.array(z.number()).optional(),
-    })),
+      shot_number: z.number().int().positive(),
+      description: z.string().max(6000),
+      atmosphere: z.string().max(1500),
+      duration: z.number().int().min(8).max(15),
+      scene_id: z.number().int().positive().nullable().optional(),
+      character_ids: z.array(z.number().int().positive()).max(20).optional(),
+      prop_ids: z.array(z.number().int().positive()).max(20).optional(),
+    }).strict()).min(1).max(10),
   }),
   execute: async ({ storyboards }, context) => {
     const ids = requireIds(context)
     if ('error' in ids) return ids
     const { userId, episodeId, dramaId } = ids
-    if (!storyboards.length) return { error: '模型未生成有效分镜，保存操作已取消' }
+    const taskId = getStoryboardTaskId(context?.requestContext)
+    const batch = getStoryboardBatch(context?.requestContext)
+    if (!taskId || !batch) return { error: '分镜拆分缺少批次上下文，无法保存' }
+    if (storyboards.length > 10) return { error: '单批最多保存 10 个分镜，请拆分后重试' }
+    const expectedCount = batch.batchEnd - batch.batchStart + 1
+    if (storyboards.length !== expectedCount || storyboards.some(sb => sb.shot_number < batch.batchStart || sb.shot_number > batch.batchEnd)) {
+      return { error: `当前批次必须恰好提交分镜 ${batch.batchStart}-${batch.batchEnd}，共 ${expectedCount} 个` }
+    }
+    const shotNumbers = storyboards.map(sb => sb.shot_number)
+    if (new Set(shotNumbers).size !== shotNumbers.length) return { error: '当前批次存在重复 shot_number' }
+
+    const [episode] = await db.select({ dramaId: schema.episodes.dramaId })
+      .from(schema.episodes)
+      .where(and(eq(schema.episodes.id, episodeId), eq(schema.episodes.userId, userId)))
+    if (!episode || episode.dramaId !== dramaId) return { error: 'Episode does not belong to the current project' }
     const ts = now()
     logTaskProgress('StoryboardTool', 'save-begin', {
+      taskId,
       episodeId,
       dramaId,
+      batchIndex: batch.batchIndex,
+      totalBatches: batch.totalBatches,
+      payloadChars: JSON.stringify(storyboards).length,
       count: storyboards.length,
       shotNumbers: storyboards.map(sb => sb.shot_number).join(','),
     })
-    const saved = await db.transaction(async (tx) => {
-      const existingStoryboardRows = await tx.select().from(schema.storyboards)
-        .where(and(eq(schema.storyboards.userId, userId), eq(schema.storyboards.episodeId, episodeId)))
-      const existingStoryboardIds = existingStoryboardRows.map(sb => sb.id)
-      for (const storyboardId of existingStoryboardIds) {
-        await tx.delete(schema.storyboardCharacters).where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
-        await tx.delete(schema.storyboardProps).where(eq(schema.storyboardProps.storyboardId, storyboardId))
-        await tx.delete(schema.storyboardAudios).where(eq(schema.storyboardAudios.storyboardId, storyboardId))
-      }
-      await tx.delete(schema.storyboards).where(and(eq(schema.storyboards.userId, userId), eq(schema.storyboards.episodeId, episodeId)))
+    await db.transaction(async (tx) => {
+      const [task] = await tx.select().from(schema.storyboardBreakdownTasks)
+        .where(and(
+          eq(schema.storyboardBreakdownTasks.taskId, taskId),
+          eq(schema.storyboardBreakdownTasks.userId, userId),
+          eq(schema.storyboardBreakdownTasks.dramaId, dramaId),
+          eq(schema.storyboardBreakdownTasks.episodeId, episodeId),
+          eq(schema.storyboardBreakdownTasks.status, 'running'),
+          eq(schema.storyboardBreakdownTasks.currentBatch, batch.batchIndex),
+          eq(schema.storyboardBreakdownTasks.retryCount, batch.retryCount),
+        ))
+        .for('update')
+      if (!task) throw new Error('当前批次已结束或已进入下一次重试，拒绝迟到的保存请求')
 
-      let totalDuration = 0
       for (const sb of storyboards) {
-        await validateStoryboardBindings(tx, userId, episodeId, dramaId, sb.scene_id, sb.character_ids, sb.prop_ids)
-        const res = await tx.insert(schema.storyboards).values({
-        userId,
-        episodeId,
-        storyboardNumber: sb.shot_number,
-        title: sb.title, shotType: sb.shot_type,
-        angle: sb.angle, movement: sb.movement,
-        location: sb.location, time: sb.time,
-        description: sb.description, result: sb.result,
-        atmosphere: sb.atmosphere, imagePrompt: sb.image_prompt,
-        videoPrompt: sb.video_prompt, bgmPrompt: sb.bgm_prompt,
-        soundEffect: sb.sound_effect,
-        sceneId: sb.scene_id, duration: sb.duration || 10,
-        createdAt: ts, updatedAt: ts,
-      })
-        await syncStoryboardCharacters(tx, getInsertId(res), sb.character_ids || [])
-        await syncStoryboardProps(tx, getInsertId(res), sb.prop_ids || [])
-        totalDuration += sb.duration || 10
+        await validateStoryboardBindings(tx, userId, episodeId, dramaId, sb.scene_id, sb.character_ids, sb.prop_ids, false)
+        await tx.delete(schema.storyboardBreakdownItems).where(and(
+          eq(schema.storyboardBreakdownItems.taskId, taskId),
+          eq(schema.storyboardBreakdownItems.shotNumber, sb.shot_number),
+        ))
+        await tx.insert(schema.storyboardBreakdownItems).values({
+          taskId,
+          batchIndex: batch.batchIndex,
+          shotNumber: sb.shot_number,
+          payload: JSON.stringify(sb),
+          createdAt: ts,
+        })
       }
-
-      await tx.update(schema.episodes)
-        .set({ duration: Math.ceil(totalDuration / 60), updatedAt: ts })
-        .where(and(eq(schema.episodes.id, episodeId), eq(schema.episodes.userId, userId)))
-      return { totalDuration }
+      await tx.update(schema.storyboardBreakdownTasks).set({
+        stage: '保存分镜',
+        currentBatch: batch.batchIndex,
+        updatedAt: ts,
+      }).where(eq(schema.storyboardBreakdownTasks.taskId, taskId))
     })
 
     logTaskSuccess('StoryboardTool', 'save-complete', {
+      taskId,
       episodeId,
+      batchIndex: batch.batchIndex,
       count: storyboards.length,
-      totalDuration: saved.totalDuration,
     })
-    return { message: `Saved ${storyboards.length} storyboards`, count: storyboards.length, total_duration: saved.totalDuration }
+    return { message: `Saved draft batch ${batch.batchIndex}`, count: storyboards.length, batch_index: batch.batchIndex }
   },
 })
 

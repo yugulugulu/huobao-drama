@@ -26,6 +26,7 @@ import { authRequired } from './middleware/auth.js'
 import { localStorageRoot, storageDriver, validateEnvironment } from './config/env.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
 import { recoverProcessingGenerationTasks } from './services/generation.js'
+import { recoverStoryboardBreakdownTasks } from './services/storyboard-breakdown.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '../..')
@@ -90,5 +91,6 @@ if (process.env.SERVE_FRONTEND !== 'false') {
 
 const port = Number(process.env.PORT || 5679)
 await recoverProcessingGenerationTasks()
+await recoverStoryboardBreakdownTasks()
 console.log(`🚀 AI Drama Studio server on http://localhost:${port}`)
 serve({ fetch: app.fetch, port })
