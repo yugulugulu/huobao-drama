@@ -1,7 +1,7 @@
 /**
  * Drizzle schema - MySQL column mappings.
  */
-import { mysqlTable, text, int, double, boolean, primaryKey, varchar } from 'drizzle-orm/mysql-core'
+import { mysqlTable, text, int, double, boolean, primaryKey, uniqueIndex, varchar } from 'drizzle-orm/mysql-core'
 
 /** 用户是所有私有业务数据的根归属。密码哈希绝不返回给前端。 */
 export const users = mysqlTable('users', {
@@ -159,6 +159,41 @@ export const storyboards = mysqlTable('storyboards', {
   updatedAt: varchar('updated_at', { length: 64 }).notNull(),
   deletedAt: varchar('deleted_at', { length: 64 }),
 })
+
+/** 分镜拆分的持久化任务与草稿批次；正式分镜仅在任务全部成功后替换。 */
+export const storyboardBreakdownTasks = mysqlTable('storyboard_breakdown_tasks', {
+  taskId: varchar('task_id', { length: 64 }).primaryKey(),
+  userId: int('user_id').notNull(),
+  dramaId: int('drama_id').notNull(),
+  episodeId: int('episode_id').notNull(),
+  message: text('message').notNull(),
+  model: text('model'),
+  configId: int('config_id'),
+  status: varchar('status', { length: 16 }).notNull().default('queued'),
+  stage: varchar('stage', { length: 32 }).notNull().default('读取剧本'),
+  totalBatches: int('total_batches').notNull().default(1),
+  completedBatches: int('completed_batches').notNull().default(0),
+  currentBatch: int('current_batch'),
+  retryCount: int('retry_count').notNull().default(0),
+  targetShots: int('target_shots').notNull().default(1),
+  error: text('error'),
+  startedAt: varchar('started_at', { length: 64 }).notNull(),
+  updatedAt: varchar('updated_at', { length: 64 }).notNull(),
+  finishedAt: varchar('finished_at', { length: 64 }),
+  activeKey: varchar('active_key', { length: 128 }),
+}, (table) => ({
+  activeKeyUnique: uniqueIndex('uk_storyboard_breakdown_tasks_active').on(table.activeKey),
+}))
+
+export const storyboardBreakdownItems = mysqlTable('storyboard_breakdown_items', {
+  taskId: varchar('task_id', { length: 64 }).notNull(),
+  batchIndex: int('batch_index').notNull(),
+  shotNumber: int('shot_number').notNull(),
+  payload: text('payload').notNull(),
+  createdAt: varchar('created_at', { length: 64 }).notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.taskId, table.shotNumber] }),
+}))
 
 export const storyboardCharacters = mysqlTable('storyboard_characters', {
   storyboardId: int('storyboard_id').notNull(),
