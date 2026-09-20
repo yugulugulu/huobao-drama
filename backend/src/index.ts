@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { proxy } from 'hono/proxy'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -22,7 +23,8 @@ import skills from './routes/skills.js'
 import props from './routes/props.js'
 import audios from './routes/audios.js'
 import auth from './routes/auth.js'
-import { authRequired } from './middleware/auth.js'
+import adminUsers from './routes/adminUsers.js'
+import { adminRequired, authRequired } from './middleware/auth.js'
 import { localStorageRoot, storageDriver, validateEnvironment } from './config/env.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
 import { recoverProcessingGenerationTasks } from './services/generation.js'
@@ -36,7 +38,7 @@ validateEnvironment()
 
 // Middleware
 app.use('*', cors({
-  origin: ['http://localhost:3013', 'http://localhost:5679'],
+  origin: ['http://localhost:3013', 'http://localhost:3014', 'http://localhost:5679', 'http://localhost:5680'],
   credentials: true,
 }))
 app.use('*', requestLogger)
@@ -50,6 +52,8 @@ const api = new Hono()
 // 认证接口在全局鉴权之前挂载；其余 API 默认必须携带合法 JWT。
 api.route('/auth', auth)
 api.use('*', authRequired)
+api.use('/admin/*', adminRequired)
+api.route('/admin/users', adminUsers)
 api.route('/dramas', dramas)
 api.route('/episodes', episodes)
 api.route('/storyboards', storyboards)
@@ -89,8 +93,23 @@ if (process.env.SERVE_FRONTEND !== 'false') {
   app.get('*', serveStatic({ root: distPath, path: 'index.html' }))
 }
 
+// 独立管理端静态服务；API 反向代理到主服务，复用同域 HttpOnly Cookie。
+const adminDistPath = path.join(projectRoot, 'admin-frontend', 'dist')
+const adminApp = new Hono()
+adminApp.all('/api/*', (c) => proxy(`http://127.0.0.1:${process.env.PORT || 5679}${c.req.path}${new URL(c.req.url).search}`, {
+  raw: c.req.raw,
+  headers: c.req.header(),
+}))
+adminApp.use('*', serveStatic({ root: adminDistPath }))
+adminApp.get('*', serveStatic({ root: adminDistPath, path: 'index.html' }))
+
 const port = Number(process.env.PORT || 5679)
+const adminPort = Number(process.env.ADMIN_PORT || 5680)
 await recoverProcessingGenerationTasks()
 await recoverStoryboardBreakdownTasks()
-console.log(`🚀 AI Drama Studio server on http://localhost:${port}`)
-serve({ fetch: app.fetch, port })
+serve({ fetch: app.fetch, port }, () => {
+  console.log(`AI Drama Studio server on http://localhost:${port}`)
+})
+serve({ fetch: adminApp.fetch, port: adminPort }, () => {
+  console.log(`Admin console on http://localhost:${adminPort}`)
+})

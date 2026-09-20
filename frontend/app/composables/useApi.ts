@@ -1,5 +1,18 @@
 const BASE = '/api/v1'
 
+async function readApiResponse(resp: Response) {
+  const text = await resp.text()
+  const message = `服务响应异常（HTTP ${resp.status}），请检查后端服务是否正常运行`
+  if (!text.trim()) throw new Error(message)
+  try {
+    const json = JSON.parse(text)
+    if (!json || typeof json !== 'object') throw new Error(message)
+    return json
+  } catch {
+    throw new Error(message)
+  }
+}
+
 async function req<T = any>(method: string, path: string, body?: any): Promise<T> {
   const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'include' }
   if (body) opts.body = JSON.stringify(body)
@@ -9,7 +22,7 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
 
   try {
     const resp = await fetch(`${BASE}${path}`, opts)
-    const json = await resp.json()
+    const json = await readApiResponse(resp)
     const ms = Math.round(performance.now() - start)
 
     if (!resp.ok || (json.code && json.code >= 400)) {
@@ -20,6 +33,15 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
         await navigateTo({ path: '/login', query: { redirect: route.fullPath } })
       }
       console.log(`%c[API] %c${method} ${path} %c${resp.status} %c${ms}ms`, 'color:#888', 'color:#ef5350', 'color:#ef5350;font-weight:bold', 'color:#888', json.message || '')
+
+      // 真人认证错误：保留完整错误信息
+      if (json.code === 'PORTRAIT_VERIFICATION_REQUIRED') {
+        const error: any = new Error(json.message || '素材涉及真人隐私，需要进行真人认证')
+        error.code = 'PORTRAIT_VERIFICATION_REQUIRED'
+        error.verificationUrl = json.verificationUrl
+        throw error
+      }
+
       throw new Error(json.message || `${resp.status}`)
     }
 
@@ -119,7 +141,7 @@ async function uploadReq<T = any>(path: string, file: File): Promise<T> {
   fd.append('file', file)
   console.log(`%c[API] %cPOST %c${path} %c${file.name}`, 'color:#888', 'color:#4fc3f7;font-weight:bold', 'color:#ccc', 'color:#888')
   const resp = await fetch(`${BASE}${path}`, { method: 'POST', body: fd, credentials: 'include' })
-  const json = await resp.json()
+  const json = await readApiResponse(resp)
   if (!resp.ok || (json.code && json.code >= 400)) {
     console.log(`%c[API] %cPOST ${path} %c${resp.status}`, 'color:#888', 'color:#ef5350', 'color:#ef5350;font-weight:bold')
     throw new Error(json.message || `${resp.status}`)

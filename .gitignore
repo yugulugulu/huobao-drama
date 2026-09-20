@@ -3,6 +3,10 @@ node_modules/
 
 # Build output
 dist/
+/frontend/dist
+/admin-frontend/dist
+.nuxt/
+.output/
 
 # IDE
 .idea/
@@ -17,6 +21,7 @@ dist/
 # 两套环境文件包含密钥，仅跟踪 .env.example 模板。
 .env.development
 .env.production
+docker-compose.local.yml
 
 # Logs
 *.log

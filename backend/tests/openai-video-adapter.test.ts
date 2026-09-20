@@ -99,3 +99,86 @@ test('unwraps TokenBox task responses before parsing upstream status', () => {
     videoUrl: 'https://example.com/tokenbox.mp4',
   })
 })
+
+test('parses portrait verification from HTTP 428 with nested verification fields', () => {
+  assert.deepEqual(adapter.parsePollResponse({
+    id: 'task-portrait-1',
+    status: 'portrait_verification_required',
+    error: {
+      code: 'PORTRAIT_VERIFICATION_REQUIRED',
+      message: '请先完成真人认证',
+      verificationId: 'verify-1',
+      verificationUrl: 'https://verify.example.com/session/1',
+    },
+    providerError: {
+      code: 'UpstreamPortraitRisk',
+      message: 'portrait verification required',
+      requestId: 'request-1',
+      httpStatus: 400,
+    },
+  }, { httpStatus: 428 }), {
+    status: 'portrait_verification_required',
+    error: '请先完成真人认证',
+    errorCode: 'PORTRAIT_VERIFICATION_REQUIRED',
+    verificationId: 'verify-1',
+    verificationUrl: 'https://verify.example.com/session/1',
+    providerError: {
+      code: 'UpstreamPortraitRisk',
+      message: 'portrait verification required',
+      requestId: 'request-1',
+      httpStatus: 400,
+    },
+  })
+})
+
+test('parses HTTP 200 portrait verification with top-level verification fields', () => {
+  assert.deepEqual(adapter.parsePollResponse({
+    status: 'portrait_verification_required',
+    error: {
+      code: 'PORTRAIT_VERIFICATION_REQUIRED',
+      message: 'verification required',
+    },
+    verificationId: 'verify-2',
+    verificationUrl: 'https://verify.example.com/session/2',
+  }, { httpStatus: 200 }), {
+    status: 'portrait_verification_required',
+    error: 'verification required',
+    errorCode: 'PORTRAIT_VERIFICATION_REQUIRED',
+    verificationId: 'verify-2',
+    verificationUrl: 'https://verify.example.com/session/2',
+    providerError: undefined,
+  })
+})
+
+test('treats HTTP 428 as portrait verification even without an explicit status or business code', () => {
+  assert.deepEqual(adapter.parsePollResponse({
+    error: {
+      message: 'verification required by precondition',
+      verificationUrl: 'https://verify.example.com/session/428',
+    },
+  }, { httpStatus: 428 }), {
+    status: 'portrait_verification_required',
+    error: 'verification required by precondition',
+    errorCode: 'PORTRAIT_VERIFICATION_REQUIRED',
+    verificationId: undefined,
+    verificationUrl: 'https://verify.example.com/session/428',
+    providerError: undefined,
+  })
+})
+
+test('recognizes the portrait verification business code without HTTP 428 or a dedicated status', () => {
+  assert.deepEqual(adapter.parsePollResponse({
+    status: 'failed',
+    error: {
+      code: 'PORTRAIT_VERIFICATION_REQUIRED',
+      verificationId: 'verify-code-only',
+    },
+  }, { httpStatus: 200 }), {
+    status: 'portrait_verification_required',
+    error: '素材涉及真人隐私，需要进行真人认证',
+    errorCode: 'PORTRAIT_VERIFICATION_REQUIRED',
+    verificationId: 'verify-code-only',
+    verificationUrl: undefined,
+    providerError: undefined,
+  })
+})

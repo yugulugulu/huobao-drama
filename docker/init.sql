@@ -1,7 +1,7 @@
 -- ============================================================================
 -- AI Drama Studio 初始化 SQL
 -- 由 backend/scripts/export-init-sql.ts 从 backend/src/db/mysql-schema.ts 生成
--- 生成时间: 2026-08-27T10:28:26.408Z
+-- 生成时间: 2026-09-20T06:56:29.494Z
 --
 -- 用途: 在全新 MySQL 8.0+ 服务器上创建数据库与当前完整表结构。
 -- 默认风格预设由应用在用户注册或历史账号初始化时按用户写入。
@@ -14,17 +14,20 @@ CREATE DATABASE IF NOT EXISTS `huobao_drama`
 USE `huobao_drama`;
 
 -- ----------------------------------------------------------------------------
--- 1. 建表(18 张)
+-- 1. 建表(23 张)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     email VARCHAR(255) NOT NULL,
     display_name VARCHAR(64) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    consumer_id VARCHAR(128) NOT NULL,
+    role VARCHAR(16) NOT NULL DEFAULT 'user',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at VARCHAR(64) NOT NULL,
     updated_at VARCHAR(64) NOT NULL,
-    UNIQUE KEY uk_users_email (email)
+    UNIQUE KEY uk_users_email (email),
+    UNIQUE KEY uk_users_consumer_id (consumer_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS dramas (
@@ -135,6 +138,41 @@ CREATE TABLE IF NOT EXISTS storyboards (
     deleted_at VARCHAR(64)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS storyboard_breakdown_tasks (
+    task_id VARCHAR(64) NOT NULL PRIMARY KEY,
+    user_id INT NOT NULL,
+    drama_id INT NOT NULL,
+    episode_id INT NOT NULL,
+    message TEXT NOT NULL,
+    model TEXT,
+    config_id INT,
+    status VARCHAR(16) NOT NULL DEFAULT 'queued',
+    stage VARCHAR(32) NOT NULL DEFAULT '读取剧本',
+    total_batches INT NOT NULL DEFAULT 1,
+    completed_batches INT NOT NULL DEFAULT 0,
+    current_batch INT,
+    retry_count INT NOT NULL DEFAULT 0,
+    target_shots INT NOT NULL DEFAULT 1,
+    error TEXT,
+    started_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    finished_at VARCHAR(64),
+    active_key VARCHAR(128),
+    UNIQUE KEY uk_storyboard_breakdown_tasks_active (active_key),
+    INDEX idx_storyboard_breakdown_tasks_episode (user_id, episode_id),
+    INDEX idx_storyboard_breakdown_tasks_status (status)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS storyboard_breakdown_items (
+    task_id VARCHAR(64) NOT NULL,
+    batch_index INT NOT NULL,
+    shot_number INT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at VARCHAR(64) NOT NULL,
+    PRIMARY KEY (task_id, shot_number),
+    INDEX idx_storyboard_breakdown_items_batch (task_id, batch_index)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS episode_characters (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     episode_id INT NOT NULL,
@@ -162,6 +200,36 @@ CREATE TABLE IF NOT EXISTS episode_props (
     INDEX idx_episode_props_prop_id (prop_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS audios (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    drama_id INT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    file_url TEXT,
+    local_path TEXT,
+    file_size INT,
+    mime_type TEXT,
+    format TEXT,
+    created_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    deleted_at VARCHAR(64),
+    INDEX idx_audios_user_id (user_id),
+    INDEX idx_audios_drama_id (drama_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS episode_audios (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    drama_id INT NOT NULL,
+    episode_id INT NOT NULL,
+    audio_id INT NOT NULL,
+    created_at VARCHAR(64) NOT NULL,
+    UNIQUE KEY uk_episode_audios_episode_audio (episode_id, audio_id),
+    INDEX idx_episode_audios_user_drama (user_id, drama_id),
+    INDEX idx_episode_audios_audio_id (audio_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS storyboard_characters (
     storyboard_id INT NOT NULL,
     character_id INT NOT NULL,
@@ -174,6 +242,16 @@ CREATE TABLE IF NOT EXISTS storyboard_props (
     prop_id INT NOT NULL,
     PRIMARY KEY (storyboard_id, prop_id),
     INDEX idx_storyboard_props_prop_id (prop_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS storyboard_audios (
+    user_id INT NOT NULL,
+    drama_id INT NOT NULL,
+    storyboard_id INT NOT NULL,
+    audio_id INT NOT NULL,
+    PRIMARY KEY (storyboard_id, audio_id),
+    INDEX idx_storyboard_audios_user_drama (user_id, drama_id),
+    INDEX idx_storyboard_audios_audio_id (audio_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS ai_service_configs (
@@ -238,6 +316,10 @@ CREATE TABLE IF NOT EXISTS sys_task (
     local_path TEXT,
     status VARCHAR(64) DEFAULT 'processing',
     error_msg TEXT,
+    error_code VARCHAR(128),
+    verification_id TEXT,
+    verification_url TEXT,
+    provider_error TEXT,
     created_at VARCHAR(64) NOT NULL,
     updated_at VARCHAR(64) NOT NULL,
     completed_at VARCHAR(64),
@@ -324,6 +406,8 @@ ALTER TABLE `storyboards` ADD COLUMN user_id INT NULL;
 
 ALTER TABLE `props` ADD COLUMN user_id INT NULL;
 
+ALTER TABLE `audios` ADD COLUMN user_id INT NULL;
+
 ALTER TABLE `sys_task` ADD COLUMN user_id INT NULL;
 
 ALTER TABLE `video_merges` ADD COLUMN user_id INT NULL;
@@ -346,6 +430,8 @@ CREATE INDEX idx_storyboards_user_id ON `storyboards` (user_id);
 
 CREATE INDEX idx_props_user_id ON `props` (user_id);
 
+CREATE INDEX idx_audios_user_id ON `audios` (user_id);
+
 CREATE INDEX idx_sys_task_user_id ON `sys_task` (user_id);
 
 CREATE INDEX idx_video_merges_user_id ON `video_merges` (user_id);
@@ -359,6 +445,8 @@ CREATE INDEX idx_style_presets_user_id ON `style_presets` (user_id);
 ALTER TABLE style_presets DROP INDEX uk_style_presets_value;
 
 ALTER TABLE style_presets ADD UNIQUE KEY uk_style_presets_user_value (user_id, value);
+
+ALTER TABLE storyboard_breakdown_tasks ADD UNIQUE KEY uk_storyboard_breakdown_tasks_active (active_key);
 
 CREATE TABLE IF NOT EXISTS user_agent_configs (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,

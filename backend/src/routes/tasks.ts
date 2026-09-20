@@ -24,6 +24,15 @@ function promptReferencesName(prompt: string, name: string): boolean {
     || new RegExp(`@音频\\d+${escaped}(?![^\\s@])`).test(prompt)
 }
 
+function taskResponse(row: typeof schema.sysTask.$inferSelect) {
+  if (!row.providerError) return row
+  try {
+    return { ...row, providerError: JSON.parse(row.providerError) }
+  } catch {
+    return row
+  }
+}
+
 // POST /tasks — 发起生成任务（body.type: image | video）
 app.post('/', async (c) => {
   const body = await c.req.json()
@@ -154,7 +163,17 @@ app.post('/', async (c) => {
     logTaskSuccess('TaskAPI', 'generate', { taskId: id, type, provider: record?.provider })
     return created(c, record)
   } catch (err: any) {
-    logTaskError('TaskAPI', 'generate', { type, error: err.message })
+    logTaskError('TaskAPI', 'generate', { type, error: err.message || err.code })
+
+    // 透传真人认证错误
+    if (err.code === 'PORTRAIT_VERIFICATION_REQUIRED') {
+      return c.json({
+        code: 'PORTRAIT_VERIFICATION_REQUIRED',
+        message: err.message || '素材涉及真人隐私，需要进行真人认证',
+        verificationUrl: err.verificationUrl
+      }, 403)
+    }
+
     return badRequest(c, err.message)
   }
 })
@@ -164,7 +183,7 @@ app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const row = await findOwnedTask(id, currentUser(c).id)
   if (!row) return notFound(c, '任务不存在')
-  return success(c, row)
+  return success(c, taskResponse(row))
 })
 
 // GET /tasks — 按 type / storyboard_id / drama_id 过滤

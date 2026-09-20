@@ -7,6 +7,15 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run generate
 
+# ── Stage 1b: Build admin frontend ───────────────────────────
+FROM node:20-slim AS admin-frontend-build
+
+WORKDIR /app/admin-frontend
+COPY admin-frontend/package.json admin-frontend/package-lock.json ./
+RUN npm ci
+COPY admin-frontend/ ./
+RUN npm run generate
+
 # ── Stage 2: Build backend native modules ────────────────────
 FROM node:20-slim AS backend-build
 
@@ -42,6 +51,7 @@ COPY backend/tsconfig.json ./backend/
 
 # Frontend static output
 COPY --from=frontend-build /app/frontend/.output/public ./frontend/dist
+COPY --from=admin-frontend-build /app/admin-frontend/.output/public ./admin-frontend/dist
 
 # Skills
 COPY backend/workspace/skills/ ./backend/workspace/skills/
@@ -50,9 +60,11 @@ RUN mkdir -p data/static
 
 ENV NODE_ENV=production
 ENV PORT=5679
+ENV ADMIN_PORT=5680
 ENV FFMPEG_BIN=/usr/bin/ffmpeg
 
 EXPOSE 5679
+EXPOSE 5680
 VOLUME ["/app/data"]
 
 CMD ["tsx", "backend/src/index.ts"]

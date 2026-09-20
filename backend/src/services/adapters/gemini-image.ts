@@ -11,8 +11,8 @@ import type {
   ImageGenerationRecord,
   ImageGenResponse,
   ImagePollResponse,
-} from './types'
-import { joinProviderUrl } from './url'
+} from './types.js'
+import { joinProviderUrl } from './url.js'
 import { parseDataUrl } from '../../utils/storage.js'
 
 export class GeminiImageAdapter implements ImageProviderAdapter {

@@ -14,8 +14,9 @@ import type {
   VideoGenerationRecord,
   VideoGenResponse,
   VideoPollResponse,
-} from './types'
-import { joinProviderUrl } from './url'
+} from './types.js'
+import { joinProviderUrl } from './url.js'
+import { parsePortraitVerificationResponse } from './portrait-verification.js'
 
 /** 仅支持 Seedance 2.0+ 系列（前缀匹配，兼容未来 2.0.x 变体） */
 const SEEDANCE2_MODEL_PREFIX = 'doubao-seedance-2-0'
@@ -114,7 +115,10 @@ export class VolcEngineVideoAdapter implements VideoProviderAdapter {
     }
   }
 
-  parsePollResponse(result: any): VideoPollResponse {
+  parsePollResponse(result: any, context?: { httpStatus?: number }): VideoPollResponse {
+    const portraitVerification = parsePortraitVerificationResponse(result, context?.httpStatus)
+    if (portraitVerification) return portraitVerification
+
     const status = result.status
     if (status === 'succeeded') {
       const videoUrl = result.video_url || result.content?.video_url || result.data?.video_url

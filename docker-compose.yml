@@ -21,6 +21,7 @@ services:
     build: .
     ports:
       - "5679:5679"
+      - "5680:5680"
     env_file:
       - ./backend/.env.production
     volumes:
@@ -30,6 +31,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5679
+      - ADMIN_PORT=5680
     depends_on:
       mysql:
         condition: service_healthy
