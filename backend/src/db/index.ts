@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs'
 import { drizzle } from 'drizzle-orm/mysql2'
 import * as schema from './schema.js'
 import { initMySqlSchema, stylePresetSeedStatements } from './mysql-schema.js'
+import { generateConsumerId } from '../utils/consumer-id.js'
 
 // 容器内 127.0.0.1 指向容器自身;未显式配置时默认指向宿主机
 // (Linux 需 --add-host=host.docker.internal:host-gateway 才能解析)
@@ -39,6 +40,8 @@ export async function initDb(retries = 10, delayMs = 3000) {
       await initMySqlSchema(pool)
       await migrateLegacyData(pool)
       await enforceTenantOwnership(pool)
+      await migrateConsumerIds(pool)
+      await ensureInitialAdmin(pool)
       return
     } catch (err) {
       if (attempt >= retries) throw err
@@ -65,8 +68,8 @@ async function migrateLegacyData(pool: mysql.Pool) {
   let userId = existingRows[0]?.id as number | undefined
   if (!userId) {
     const [result] = await pool.query<mysql.ResultSetHeader>(
-      'INSERT INTO users (email, display_name, password_hash, is_active, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)',
-      [email, displayName, await bcrypt.hash(password, 12), ts, ts],
+      'INSERT INTO users (email, display_name, password_hash, consumer_id, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)',
+      [email, displayName, await bcrypt.hash(password, 12), generateConsumerId(), ts, ts],
     )
     userId = result.insertId
   }
@@ -88,6 +91,83 @@ async function enforceTenantOwnership(pool: mysql.Pool) {
   const tenantTables = ['dramas', 'episodes', 'characters', 'scenes', 'storyboards', 'props', 'audios', 'sys_task', 'video_merges', 'assets', 'ai_service_configs', 'style_presets']
   for (const table of tenantTables) {
     await pool.query(`ALTER TABLE \`${table}\` MODIFY COLUMN user_id INT NOT NULL`)
+  }
+}
+
+/** 为现有用户生成唯一的 consumer_id */
+async function migrateConsumerIds(pool: mysql.Pool) {
+  // 先添加列（如果不存在）
+  try {
+    await pool.query(`
+      ALTER TABLE users
+      ADD COLUMN consumer_id VARCHAR(128) UNIQUE NULL
+    `)
+  } catch (err: any) {
+    // 列已存在，忽略错误
+    if (!err.message.includes('Duplicate column name')) {
+      throw err
+    }
+  }
+
+  // 获取所有没有 consumer_id 的用户
+  const [users] = await pool.query<mysql.RowDataPacket[]>(
+    'SELECT id FROM users WHERE consumer_id IS NULL OR consumer_id = ""'
+  )
+
+  // 逐个生成唯一的 consumer_id
+  for (const user of users) {
+    let attempts = 0
+    while (attempts < 5) {
+      try {
+        const consumerId = generateConsumerId()
+        await pool.query(
+          'UPDATE users SET consumer_id = ? WHERE id = ?',
+          [consumerId, user.id]
+        )
+        break
+      } catch (err: any) {
+        if (err.code === 'ER_DUP_ENTRY') {
+          attempts++
+          continue
+        }
+        throw err
+      }
+    }
+  }
+
+  // 收紧为 NOT NULL
+  await pool.query(`
+    ALTER TABLE users
+    MODIFY COLUMN consumer_id VARCHAR(128) NOT NULL UNIQUE
+  `)
+}
+
+/** 可选地从部署环境创建或提升首个管理员，避免开放注册产生管理员账号。 */
+async function ensureInitialAdmin(pool: mysql.Pool) {
+  const email = String(process.env.INITIAL_ADMIN_EMAIL || '').trim().toLowerCase()
+  if (!email) return
+
+  const [rows] = await pool.query<mysql.RowDataPacket[]>('SELECT id, role FROM users WHERE email = ? LIMIT 1', [email])
+  const existing = rows[0]
+  const ts = new Date().toISOString()
+  if (existing) {
+    if (existing.role !== 'admin') {
+      await pool.query('UPDATE users SET role = ?, updated_at = ? WHERE id = ?', ['admin', ts, existing.id])
+    }
+    return
+  }
+
+  const password = String(process.env.INITIAL_ADMIN_PASSWORD || '')
+  if (password.length < 8) {
+    throw new Error('配置 INITIAL_ADMIN_EMAIL 时，INITIAL_ADMIN_PASSWORD 至少需要 8 个字符')
+  }
+  const displayName = String(process.env.INITIAL_ADMIN_DISPLAY_NAME || '系统管理员').trim().slice(0, 64) || '系统管理员'
+  const [result] = await pool.query<mysql.ResultSetHeader>(
+    'INSERT INTO users (email, display_name, password_hash, consumer_id, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)',
+    [email, displayName, await bcrypt.hash(password, 12), generateConsumerId(), 'admin', ts, ts],
+  )
+  for (const seed of stylePresetSeedStatements(result.insertId)) {
+    await pool.query(seed.sql, seed.params)
   }
 }
 

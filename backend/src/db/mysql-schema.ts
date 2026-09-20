@@ -6,10 +6,13 @@ export const mysqlSchemaStatements = [
     email VARCHAR(255) NOT NULL,
     display_name VARCHAR(64) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    consumer_id VARCHAR(128) NOT NULL,
+    role VARCHAR(16) NOT NULL DEFAULT 'user',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at VARCHAR(64) NOT NULL,
     updated_at VARCHAR(64) NOT NULL,
-    UNIQUE KEY uk_users_email (email)
+    UNIQUE KEY uk_users_email (email),
+    UNIQUE KEY uk_users_consumer_id (consumer_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS dramas (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -297,6 +300,10 @@ export const mysqlSchemaStatements = [
     local_path TEXT,
     status VARCHAR(64) DEFAULT 'processing',
     error_msg TEXT,
+    error_code VARCHAR(128),
+    verification_id TEXT,
+    verification_url TEXT,
+    provider_error TEXT,
     created_at VARCHAR(64) NOT NULL,
     updated_at VARCHAR(64) NOT NULL,
     completed_at VARCHAR(64),
@@ -380,6 +387,7 @@ const tenantTables = ['dramas', 'episodes', 'characters', 'scenes', 'storyboards
  * 显式记录表名和字段名也便于结构测试确认迁移覆盖范围。
  */
 export const mysqlColumnBackfillStatements = [
+  { table: 'users', column: 'role', sql: "ALTER TABLE `users` ADD COLUMN `role` VARCHAR(16) NOT NULL DEFAULT 'user' AFTER `password_hash`" },
   { table: 'dramas', column: 'aspect_ratio', sql: "ALTER TABLE `dramas` ADD COLUMN `aspect_ratio` VARCHAR(16) DEFAULT '16:9'" },
   { table: 'episodes', column: 'resolution', sql: "ALTER TABLE `episodes` ADD COLUMN `resolution` VARCHAR(16) DEFAULT '720p'" },
   { table: 'characters', column: 'styling', sql: 'ALTER TABLE `characters` ADD COLUMN `styling` TEXT' },
@@ -389,6 +397,10 @@ export const mysqlColumnBackfillStatements = [
   { table: 'scenes', column: 'final_prompt', sql: 'ALTER TABLE `scenes` ADD COLUMN `final_prompt` TEXT' },
   { table: 'props', column: 'final_prompt', sql: 'ALTER TABLE `props` ADD COLUMN `final_prompt` TEXT' },
   { table: 'storyboard_breakdown_tasks', column: 'active_key', sql: 'ALTER TABLE `storyboard_breakdown_tasks` ADD COLUMN `active_key` VARCHAR(128)' },
+  { table: 'sys_task', column: 'error_code', sql: 'ALTER TABLE `sys_task` ADD COLUMN `error_code` VARCHAR(128)' },
+  { table: 'sys_task', column: 'verification_id', sql: 'ALTER TABLE `sys_task` ADD COLUMN `verification_id` TEXT' },
+  { table: 'sys_task', column: 'verification_url', sql: 'ALTER TABLE `sys_task` ADD COLUMN `verification_url` TEXT' },
+  { table: 'sys_task', column: 'provider_error', sql: 'ALTER TABLE `sys_task` ADD COLUMN `provider_error` TEXT' },
 ]
 
 export const tenantMigrationStatements = [

@@ -9,8 +9,8 @@ import type {
   AIConfig,
   ImageGenerationRecord,
   ImageGenResponse,
-} from './types'
-import { joinProviderUrl } from './url'
+} from './types.js'
+import { joinProviderUrl } from './url.js'
 
 export class OpenAIImageAdapter implements ImageProviderAdapter {
   provider = 'openai'

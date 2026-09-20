@@ -26,7 +26,7 @@ export interface ImageProviderAdapter {
   buildPollRequest?(config: AIConfig, taskId: string): ProviderRequest
 
   /** 解析异步图片任务响应；同步图片 provider 不实现。 */
-  parsePollResponse?(result: any): ImagePollResponse
+  parsePollResponse?(result: any, context?: { httpStatus?: number }): ImagePollResponse
 
   /**
    * 从响应中提取图片 URL（用于直接下载）
@@ -53,7 +53,7 @@ export interface VideoProviderAdapter {
 
   buildPollRequest(config: AIConfig, taskId: string): ProviderRequest
 
-  parsePollResponse(result: any): VideoPollResponse
+  parsePollResponse(result: any, context?: { httpStatus?: number }): VideoPollResponse
 
   extractVideoUrl(result: any): string | null
 }
@@ -99,6 +99,7 @@ export interface VideoGenerationRecord {
   duration?: number | null
   aspectRatio?: string | null
   resolution?: string | null
+  consumerId?: string | null
   // ... 其他字段
 }
 
@@ -122,7 +123,16 @@ export interface VideoGenResponse {
 }
 
 export interface VideoPollResponse {
-  status: 'pending' | 'processing' | 'completed' | 'failed'
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'portrait_verification_required'
   videoUrl?: string
   error?: string
+  errorCode?: string
+  verificationId?: string
+  verificationUrl?: string
+  providerError?: {
+    code?: string
+    message?: string
+    requestId?: string
+    httpStatus?: number
+  }
 }

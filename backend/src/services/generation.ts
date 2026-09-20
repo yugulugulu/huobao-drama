@@ -8,8 +8,8 @@ import { getActiveConfig, getActiveConfigForProvider, getConfigById } from './ai
 import { now } from '../utils/response.js'
 import { downloadFile, generateImageThumb, readImageAsCompressedDataUrl, saveBase64Image } from '../utils/storage.js'
 import { extractVideoPoster } from '../utils/video-poster.js'
-import { getImageAdapter, getVideoAdapter } from './adapters/registry'
-import type { AIConfig } from './adapters/types'
+import { getImageAdapter, getVideoAdapter } from './adapters/registry.js'
+import type { AIConfig, VideoPollResponse } from './adapters/types.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
 
 type TaskType = 'image' | 'video'
@@ -191,6 +191,11 @@ async function processTask(id: number, userId: number, config: AIConfig) {
     const type = record.type as TaskType
     const label = taskLabel(type)
     const params = parseTaskParams(record.params)
+
+    // 获取用户的 consumer_id
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId))
+    const consumerId = user?.consumerId || 'default'
+
     logTaskProgress(label, 'build-request', {
       id,
       provider: config.provider,
@@ -236,6 +241,7 @@ async function processTask(id: number, userId: number, config: AIConfig) {
         duration: params.duration,
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
+        consumerId,
       }))
     }
 
@@ -255,7 +261,27 @@ async function processTask(id: number, userId: number, config: AIConfig) {
       signal: AbortSignal.timeout(600_000),
     })
 
-    if (!resp.ok) throw new Error(`API error ${resp.status}: ${await resp.text()}`)
+    if (!resp.ok) {
+      const errorText = await resp.text()
+      let errorData: any
+      try {
+        errorData = JSON.parse(errorText)
+      } catch {
+        throw new Error(`API error ${resp.status}: ${errorText}`)
+      }
+
+      // 透传真人认证错误
+      if (errorData.error?.code === 'PORTRAIT_VERIFICATION_REQUIRED' || errorData.errorCode === 'PORTRAIT_VERIFICATION_REQUIRED') {
+        const verificationUrl = errorData.error?.verificationUrl || errorData.verificationUrl
+        throw {
+          code: 'PORTRAIT_VERIFICATION_REQUIRED',
+          message: '素材涉及真人隐私，需要进行真人认证',
+          verificationUrl,
+        }
+      }
+
+      throw new Error(`API error ${resp.status}: ${errorText}`)
+    }
     const result = await resp.json() as any
     logTaskPayload(label, 'response payload', { id, provider: config.provider, result })
 
@@ -312,6 +338,27 @@ async function failTask(id: number, userId: number, message: string) {
   logTaskError('SysTask', 'failed', { id, error: message })
   await db.update(schema.sysTask)
     .set({ status: 'failed', errorMsg: message, updatedAt: now() })
+    .where(and(eq(schema.sysTask.id, id), eq(schema.sysTask.userId, userId)))
+}
+
+async function requirePortraitVerification(id: number, userId: number, response: VideoPollResponse) {
+  const message = response.error || '素材涉及真人隐私，需要进行真人认证'
+  logTaskWarn('SysTask', 'portrait-verification-required', {
+    id,
+    verificationId: response.verificationId,
+    providerError: response.providerError,
+  })
+  await db.update(schema.sysTask)
+    .set({
+      status: 'portrait_verification_required',
+      errorMsg: message,
+      errorCode: response.errorCode || 'PORTRAIT_VERIFICATION_REQUIRED',
+      verificationId: response.verificationId,
+      verificationUrl: response.verificationUrl,
+      providerError: response.providerError ? JSON.stringify(response.providerError) : null,
+      completedAt: now(),
+      updatedAt: now(),
+    })
     .where(and(eq(schema.sysTask.id, id), eq(schema.sysTask.userId, userId)))
 }
 
@@ -398,11 +445,16 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
         headers,
         signal: AbortSignal.timeout(remainingMs),
       })
-      if (!resp.ok) continue
+      if (!resp.ok && resp.status !== 428) continue
       const result = await resp.json() as any
 
       // 图片/视频 PollResponse 结构不同，这里统一按 any 取值后按 type 分支
-      const pollResp: any = adapter.parsePollResponse(result)
+      const pollResp: any = adapter.parsePollResponse(result, { httpStatus: resp.status })
+
+      if (type === 'video' && pollResp.status === 'portrait_verification_required') {
+        await requirePortraitVerification(record.id, record.userId, pollResp)
+        return
+      }
 
       if (pollResp.status === 'completed') {
         if (type === 'image') {

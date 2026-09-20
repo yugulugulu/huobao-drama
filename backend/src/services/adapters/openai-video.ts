@@ -10,8 +10,9 @@ import type {
   VideoGenerationRecord,
   VideoGenResponse,
   VideoPollResponse,
-} from './types'
-import { joinProviderUrl } from './url'
+} from './types.js'
+import { joinProviderUrl } from './url.js'
+import { parsePortraitVerificationResponse } from './portrait-verification.js'
 
 const DEFAULT_MODEL = 'doubao-seedance-2-0-260128'
 const REF_LIMITS = { images: 9, videos: 3, audios: 3 } as const
@@ -69,13 +70,21 @@ export class OpenAIVideoAdapter implements VideoProviderAdapter {
       content.push({ type: 'audio_url', audio_url: { url }, role: 'reference_audio' })
     }
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    }
+
+    // 添加 X-Consumer-Id 请求头
+    if (record.consumerId) {
+      console.log(`[X-Consumer-Id] Adding header for user: ${record.consumerId}`)
+      headers['X-Consumer-Id'] = record.consumerId
+    }
+
     return {
       url: joinProviderUrl(config.baseUrl, '/v1', '/video/generations'),
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
+      headers,
       body: {
         model,
         content,
@@ -109,7 +118,10 @@ export class OpenAIVideoAdapter implements VideoProviderAdapter {
     }
   }
 
-  parsePollResponse(result: any): VideoPollResponse {
+  parsePollResponse(result: any, context?: { httpStatus?: number }): VideoPollResponse {
+    const portraitVerification = parsePortraitVerificationResponse(result, context?.httpStatus)
+    if (portraitVerification) return portraitVerification
+
     const payload = result?.data?.data ?? result?.data ?? result
     const status = String(payload?.status || '').toLowerCase()
 

@@ -2,12 +2,12 @@
  * Provider Adapter 注册表
  * 根据 provider 名称返回对应的 Adapter 实例
  */
-import { OpenAIImageAdapter } from './openai-image'
-import { GeminiImageAdapter } from './gemini-image'
-import { VolcEngineImageAdapter } from './volcengine-image'
-import { OpenAIVideoAdapter } from './openai-video'
-import { VolcEngineVideoAdapter } from './volcengine-video'
-import type { ImageProviderAdapter, VideoProviderAdapter } from './types'
+import { OpenAIImageAdapter } from './openai-image.js'
+import { GeminiImageAdapter } from './gemini-image.js'
+import { VolcEngineImageAdapter } from './volcengine-image.js'
+import { OpenAIVideoAdapter } from './openai-video.js'
+import { VolcEngineVideoAdapter } from './volcengine-video.js'
+import type { ImageProviderAdapter, VideoProviderAdapter } from './types.js'
 
 // 图片 Adapter 注册表
 export const imageAdapters: Record<string, ImageProviderAdapter> = {

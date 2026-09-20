@@ -891,7 +891,18 @@
                       <span class="video-task-sep">·</span>
                       <span>参考 {{ task.referenceCount }}</span>
                     </div>
-                    <div v-if="task.error" class="video-task-error">{{ task.error }}</div>
+                    <div v-if="task.error" class="video-task-error">
+                      <span>{{ task.error }}</span>
+                      <button
+                        v-if="task.verification?.verificationUrl"
+                        type="button"
+                        class="video-verification-link"
+                        @click.stop="openPortraitVerification(task.verification, task.storyboard.id)"
+                      >
+                        前往认证
+                        <ExternalLink :size="11" />
+                      </button>
+                    </div>
                   </div>
                   <span :class="['video-task-status', 'is-' + videoTaskState(task.storyboard)]">
                     <span :class="['dot', videoTaskState(task.storyboard) === 'done' && 'ok', videoTaskState(task.storyboard) === 'pending' && 'pending']" />
@@ -1146,6 +1157,23 @@
                     </div>
                   </section>
 
+                  <div v-if="videoVerificationFor(selectedSb.id)" class="video-verification-callout">
+                    <ShieldCheck :size="16" />
+                    <div>
+                      <strong>需要真人认证</strong>
+                      <span>完成认证后，请重新提交视频生成任务。</span>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      :disabled="!videoVerificationFor(selectedSb.id)?.verificationUrl"
+                      @click="openPortraitVerification(videoVerificationFor(selectedSb.id), selectedSb.id)"
+                    >
+                      前往认证
+                      <ExternalLink :size="11" />
+                    </button>
+                  </div>
+
                   <button
                     class="btn btn-primary video-inspector-action"
                     :disabled="videoTaskState(selectedSb) === 'pending'"
@@ -1360,7 +1388,18 @@
                   <span class="video-task-sep">·</span>
                   <span>#{{ row.id }}</span>
                 </div>
-                <div v-if="row.errorMsg" class="video-task-error">{{ row.errorMsg }}</div>
+                <div v-if="row.errorMsg" class="video-task-error">
+                  <span>{{ row.errorMsg }}</span>
+                  <button
+                    v-if="row.verificationUrl"
+                    type="button"
+                    class="video-verification-link"
+                    @click="openPortraitVerification(row, row.storyboardId)"
+                  >
+                    前往认证
+                    <ExternalLink :size="11" />
+                  </button>
+                </div>
               </div>
               <span :class="['video-task-status', 'is-' + genTaskStateClass(row.status)]">
                 <span :class="['dot', genTaskStateClass(row.status) === 'done' && 'ok', genTaskStateClass(row.status) === 'pending' && 'pending']" />
@@ -1797,6 +1836,45 @@
         </section>
       </div>
 
+      <div
+        v-if="portraitVerificationDialog.open"
+        class="overlay portrait-verification-overlay"
+        @click.self="closePortraitVerification"
+      >
+        <section class="dialog portrait-verification-dialog" role="dialog" aria-modal="true" aria-label="需要真人认证">
+          <header class="dialog-head">
+            <div class="portrait-verification-title">
+              <span class="portrait-verification-icon"><ShieldCheck :size="18" /></span>
+              <div>
+                <h2 class="dialog-title">需要真人认证</h2>
+                <span v-if="portraitVerificationDialog.verificationId" class="portrait-verification-id">
+                  认证会话 {{ portraitVerificationDialog.verificationId }}
+                </span>
+              </div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" title="关闭" aria-label="关闭" @click="closePortraitVerification">
+              <X :size="14" />
+            </button>
+          </header>
+          <div class="dialog-body portrait-verification-body">
+            <p>素材涉及真人隐私，需要进行真人认证。</p>
+            <p>完成认证后，请返回当前页面并自行重新提交视频生成任务。旧任务不会继续轮询或自动重试。</p>
+          </div>
+          <footer class="dialog-foot">
+            <button type="button" class="btn" @click="closePortraitVerification">关闭</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              :disabled="!portraitVerificationDialog.verificationUrl"
+              @click="goToPortraitVerification"
+            >
+              前往认证
+              <ExternalLink :size="12" />
+            </button>
+          </footer>
+        </section>
+      </div>
+
       <ConfirmDialog
         :open="assetDelete.open"
         :title="`删除${assetDeleteTypeLabel}`"
@@ -1814,7 +1892,7 @@
 import { toast } from 'vue-sonner'
 import {
   Users, Video, FileText, FolderKanban, Clapperboard, Download, Loader2, RotateCcw,
-  MapPin, Play, Plus, Search, X, ListTodo, LogOut, Settings, Music, Upload,
+  MapPin, Play, Plus, Search, X, ListTodo, LogOut, Settings, Music, Upload, ShieldCheck, ExternalLink,
 } from 'lucide-vue-next'
 import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, aiConfigAPI, uploadAPI, audioAPI } from '~/composables/useApi'
 import { useAgent } from '~/composables/useAgent'
@@ -1975,6 +2053,14 @@ const {
 } = usePendingImageAssets()
 const pendingVideoIds = ref([])
 const failedVideoMessages = ref({})
+const portraitVerificationTasks = ref({})
+const portraitVerificationDialog = ref({
+  open: false,
+  storyboardId: null,
+  verificationId: '',
+  verificationUrl: '',
+  message: '',
+})
 // 任务列表面板：顶栏按钮触发的右侧抽屉,按集聚合 sys_task + video_merges
 const genTasks = ref([])
 const genMerges = ref([])
@@ -1988,6 +2074,37 @@ function openTaskDrawer() {
 }
 function closeTaskDrawer() {
   taskDrawer.value = false
+}
+
+function normalizePortraitVerification(task = {}) {
+  return {
+    verificationId: task.verificationId || task.verification_id || '',
+    verificationUrl: task.verificationUrl || task.verification_url || '',
+    message: task.message || task.errorMsg || task.error_msg || '素材涉及真人隐私，需要进行真人认证。',
+  }
+}
+
+function videoVerificationFor(storyboardId) {
+  return portraitVerificationTasks.value[storyboardId] || null
+}
+
+function openPortraitVerification(task, storyboardId) {
+  const verification = normalizePortraitVerification(task)
+  portraitVerificationDialog.value = {
+    open: true,
+    storyboardId,
+    ...verification,
+  }
+}
+
+function closePortraitVerification() {
+  portraitVerificationDialog.value.open = false
+}
+
+function goToPortraitVerification() {
+  const url = portraitVerificationDialog.value.verificationUrl
+  if (!url) return
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 // Seedance 2.0 视频生成面板：仅多模态参考（参考图 0-9 + 参考视频 0-3 + 参考音频 0-3 + 可选文本）
 const videoRefVideoUrls = ref([])
@@ -2327,7 +2444,8 @@ function sceneLightingValue(scene) {
 
 function handleImageViewerKeydown(event) {
   if (event.key !== 'Escape') return
-  if (storyboardEditor.value.open) closeStoryboardEditor()
+  if (portraitVerificationDialog.value.open) closePortraitVerification()
+  else if (storyboardEditor.value.open) closeStoryboardEditor()
   else if (imageViewer.value.open) closeImageViewer()
   else if (assetDetail.value.open) closeAssetDetail()
   else if (taskDrawer.value) closeTaskDrawer()
@@ -2356,6 +2474,7 @@ function videoFailMessage(id) {
 }
 
 function videoTaskState(sb) {
+  if (videoVerificationFor(sb?.id)) return 'verification'
   if (hasVid(sb)) return 'done'
   if (isPendingVideo(sb?.id)) return 'pending'
   if (videoFailMessage(sb?.id)) return 'failed'
@@ -2366,6 +2485,7 @@ function videoTaskStatusLabel(sb) {
   const state = videoTaskState(sb)
   if (state === 'done') return '已完成'
   if (state === 'pending') return '生成中'
+  if (state === 'verification') return '待认证'
   if (state === 'failed') return '失败'
   return '待生成'
 }
@@ -2374,6 +2494,7 @@ function videoTaskActionLabel(sb) {
   const state = videoTaskState(sb)
   if (state === 'done') return '重新生成'
   if (state === 'pending') return '生成中'
+  if (state === 'verification') return '重新生成'
   return '生成'
 }
 
@@ -2390,7 +2511,8 @@ const videoTaskRows = computed(() => sbs.value.map((sb, index) => {
     duration: Number.isFinite(duration) ? duration : 5,
     referenceCount,
     state: videoTaskState(sb),
-    error: videoFailMessage(sb.id),
+    error: videoVerificationFor(sb.id)?.message || videoFailMessage(sb.id),
+    verification: videoVerificationFor(sb.id),
   }
 }))
 const videoTaskDoneCount = computed(() => videoTaskRows.value.filter(task => task.state === 'done').length)
@@ -2459,7 +2581,25 @@ async function loadGenTasks() {
     const data = await taskAPI.listByEpisode(epId.value)
     genTasks.value = data?.tasks || []
     genMerges.value = data?.merges || []
+    syncPortraitVerificationTasks()
   } catch { /* 静默失败,不打断其他刷新 */ }
+}
+
+function syncPortraitVerificationTasks() {
+  const latestByStoryboard = new Map()
+  for (const task of genTasks.value) {
+    const storyboardId = task.storyboard_id ?? task.storyboardId
+    if (task.type !== 'video' || storyboardId == null) continue
+    const previous = latestByStoryboard.get(String(storyboardId))
+    if (!previous || Number(task.id) > Number(previous.id)) latestByStoryboard.set(String(storyboardId), task)
+  }
+
+  const next = {}
+  for (const [storyboardId, task] of latestByStoryboard) {
+    if (task.status !== 'portrait_verification_required') continue
+    next[storyboardId] = normalizePortraitVerification(task)
+  }
+  portraitVerificationTasks.value = next
 }
 
 function stopGenTasksPolling() {
@@ -2568,11 +2708,14 @@ const genTaskRows = computed(() => {
     key: `task-${t.id}`,
     kind: t.type, // image | video
     id: t.id,
+    storyboardId: t.storyboard_id ?? t.storyboardId ?? null,
     targetLabel: genTaskTargetLabel(t),
     provider: t.provider || '',
     model: t.model || '',
     status: t.status || 'processing',
     errorMsg: t.error_msg || '',
+    verificationId: t.verification_id || t.verificationId || '',
+    verificationUrl: t.verification_url || t.verificationUrl || '',
     previewUrl: t.local_path || t.result_url || '',
     prompt: t.prompt || '',
     createdAt: t.created_at || '',
@@ -2601,6 +2744,7 @@ function genTaskKindLabel(kind) {
 
 function genTaskStatusLabel(status) {
   if (status === 'completed') return '已完成'
+  if (status === 'portrait_verification_required') return '待认证'
   if (status === 'failed') return '失败'
   return '生成中'
 }
@@ -2608,6 +2752,7 @@ function genTaskStatusLabel(status) {
 // 映射到现有 video-task-status 的样式类:is-done / is-pending / is-failed
 function genTaskStateClass(status) {
   if (status === 'completed') return 'done'
+  if (status === 'portrait_verification_required') return 'verification'
   if (status === 'failed') return 'failed'
   return 'pending'
 }
@@ -3933,6 +4078,11 @@ async function genVid(sb) {
   }
   try {
     delete failedVideoMessages.value[sb.id]
+    if (portraitVerificationTasks.value[sb.id]) {
+      const next = { ...portraitVerificationTasks.value }
+      delete next[sb.id]
+      portraitVerificationTasks.value = next
+    }
     if (!isPendingVideo(sb.id)) pendingVideoIds.value.push(sb.id)
     const generation = await taskAPI.generate({ type: 'video', ...params })
     toast.success('视频生成中')
@@ -3962,6 +4112,17 @@ async function pollVideoGeneration(generationId, storyboardId) {
     try {
       const res = await taskAPI.get(generationId)
       await refresh()
+      if (res?.status === 'portrait_verification_required') {
+        pendingVideoIds.value = pendingVideoIds.value.filter(item => item !== storyboardId)
+        delete failedVideoMessages.value[storyboardId]
+        const verification = normalizePortraitVerification(res)
+        portraitVerificationTasks.value = {
+          ...portraitVerificationTasks.value,
+          [storyboardId]: verification,
+        }
+        openPortraitVerification(verification, storyboardId)
+        return
+      }
       if (['completed', 'succeeded'].includes(res?.status)) {
         pendingVideoIds.value = pendingVideoIds.value.filter(item => item !== storyboardId)
         delete failedVideoMessages.value[storyboardId]
@@ -6126,6 +6287,11 @@ onMounted(async () => {
   border-color: rgba(255,159,10,0.32);
   background: var(--warning-bg);
 }
+.video-task-status.is-verification {
+  color: var(--warning);
+  border-color: rgba(255,159,10,0.38);
+  background: var(--warning-bg);
+}
 .video-task-table {
   flex: 1;
   min-height: 0;
@@ -6152,6 +6318,9 @@ onMounted(async () => {
 }
 .video-task-row.is-failed {
   background: var(--error-bg);
+}
+.video-task-row.is-verification {
+  background: var(--warning-bg);
 }
 .video-task-row.active {
   background: var(--sel-bg);
@@ -6232,6 +6401,25 @@ onMounted(async () => {
   font-size: 11px;
   line-height: 1.45;
   color: var(--error);
+}
+.video-task-row.is-verification .video-task-error {
+  color: var(--warning);
+}
+.video-verification-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.video-verification-link:hover {
+  color: var(--text-0);
 }
 .video-task-status {
   justify-self: end;
@@ -6363,6 +6551,78 @@ onMounted(async () => {
 .video-inspector-params dt { color: var(--text-3); }
 .video-inspector-params dd { margin: 0; color: var(--text-1); text-align: right; }
 .video-inspector-action { width: 100%; }
+.video-verification-callout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,159,10,0.32);
+  border-radius: var(--radius);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.video-verification-callout div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.video-verification-callout strong {
+  font-size: 12px;
+  color: var(--text-0);
+}
+.video-verification-callout span {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
+.portrait-verification-overlay {
+  z-index: 125;
+  padding: 20px;
+}
+.portrait-verification-dialog {
+  width: min(480px, calc(100vw - 40px));
+}
+.portrait-verification-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.portrait-verification-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: var(--radius);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.portrait-verification-id {
+  display: block;
+  max-width: 320px;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.portrait-verification-body {
+  display: grid;
+  gap: 8px;
+}
+.portrait-verification-body p {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.65;
+}
 .video-ref-media-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .video-ref-media-chip {
   display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
